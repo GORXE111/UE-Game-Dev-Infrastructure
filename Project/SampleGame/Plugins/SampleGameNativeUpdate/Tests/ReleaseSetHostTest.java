@@ -45,7 +45,7 @@ public final class ReleaseSetHostTest {
         store.confirm(selected.getString("attemptId"), ref.getLong("releaseId"), ref.getString("manifestSha256"), selected.getJSONObject("manifest").getJSONObject("save").getLong("schema"));
     }
     private static JSONObject trust(File fixtures) throws Exception { return ReleaseSet.parse(read(fixtures, "trust.json"), ReleaseSet.MAX_MANIFEST); }
-    private static File save(JSONObject selected) throws Exception { return new File(selected.getString("savesRoot"), "ColaLabQuickSave.sav"); }
+    private static File save(JSONObject selected) throws Exception { return new File(selected.getString("savesRoot"), "ExampleQuickSave.sav"); }
 
     public static void main(String[] args) throws Exception {
         File fixtures = new File(args[0]).getCanonicalFile(), output = new File(args[1]).getCanonicalFile();
@@ -66,7 +66,7 @@ public final class ReleaseSetHostTest {
         rejects(() -> verifier.verify(target, new byte[256]), "Reject wrong signature");
         File legacy = new File(output, "legacy"); check(legacy.mkdir(), "Legacy save directory created");
         byte[] original = "legacy-original".getBytes(StandardCharsets.UTF_8);
-        Files.write(new File(legacy, "ColaLabQuickSave.sav").toPath(), original);
+        Files.write(new File(legacy, "ExampleQuickSave.sav").toPath(), original);
         File root = new File(output, "store");
         JSONObject baseSelection, targetSelection;
         try (ReleaseSet.Store store = new ReleaseSet.Store(root, trust, verifier)) {
@@ -124,7 +124,7 @@ public final class ReleaseSetHostTest {
             rejects(() -> store.initialize(new File(fixtures, "payload-100"), base, legacy), "Interrupted first import leaves no selected partial set");
             JSONObject retry = store.initialize(new File(fixtures, "payload-100"), base, legacy);
             check(Arrays.equals(Files.readAllBytes(save(retry).toPath()), original), "First import safely retries verified payload and isolated saves");
-            check(Arrays.equals(read(legacy, "ColaLabQuickSave.sav"), original), "Interrupted import never rewrites source progress");
+            check(Arrays.equals(read(legacy, "ExampleQuickSave.sav"), original), "Interrupted import never rewrites source progress");
         }
         File handover = new File(output, "handover");
         JSONObject selected;
@@ -141,7 +141,7 @@ public final class ReleaseSetHostTest {
         File destination = new File(output, "new-base"); check(destination.mkdir(), "New baseline destination created");
         File snapshot = ReleasePlayer.releaseSnapshot(handover, destination, trust, new JSONArray().put(1), verifier);
         check(Arrays.equals(read(snapshot, "Saved/SaveGames/progress.sav"), original), "Cross-base snapshot preserves actual save bytes");
-        check(!new File(snapshot, "ColaLabQuickSave.sav").exists(), "Cross-base snapshot contains only authored user trees");
+        check(!new File(snapshot, "ExampleQuickSave.sav").exists(), "Cross-base snapshot contains only authored user trees");
         check(Arrays.equals(oldState, read(handover, "state.json")), "Old confirmed state remains byte-identical");
         Files.write(new File(handover, "state.json.bak").toPath(), oldState);
         try (ReleaseSet.Store store = new ReleaseSet.Store(handover, trust, verifier)) {

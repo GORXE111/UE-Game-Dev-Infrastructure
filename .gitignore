@@ -26,6 +26,7 @@ DerivedDataCache/
 *.exe
 *.partial
 release-output/
+local-projects/
 coverage/
 __pycache__/
 *.py[cod]

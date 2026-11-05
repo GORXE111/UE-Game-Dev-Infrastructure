@@ -17,6 +17,7 @@ from contextlib import contextmanager
 
 import compatibility
 import content_plan
+import project_integration
 import release_identity
 import release_set as sets
 
@@ -104,10 +105,12 @@ def current_commit(project, clean=True):
 
 
 def identity(project, engine):
+    repo = Path(project).resolve().parents[1]
+    adapter = repo / project_integration.NATIVE_HASH_SCRIPT
+    sets.require(adapter.is_file(), f"Install the project-owned native source hash adapter at {adapter}")
     modules = json.loads((Path(engine) / "Engine/Binaries/Win64/UnrealEditor.modules").read_text(encoding="utf-8-sig"))
     frozen = compatibility.freeze(project, modules["BuildId"])
-    repo = Path(project).resolve().parents[1]
-    native = subprocess.run(["pwsh", "-NoProfile", "-File", str(repo / "Tools/Release/Read-NativeSourceHash.ps1")],
+    native = subprocess.run(["pwsh", "-NoProfile", "-File", str(adapter)],
                             capture_output=True, text=True, encoding="utf-8", check=True).stdout.strip().lstrip("\ufeff")
     return dict(sourceCommit=current_commit(project), nativeSourceHash=sets.sha(native), engineBuildId=modules["BuildId"],
                 shellCompatibilityId=frozen["shellCompatibilityId"], sourceInventorySha256=hashlib.sha256(sets.canonical(frozen["files"])).hexdigest()), frozen
@@ -165,10 +168,10 @@ def build(args):
     sets.write_new(output / "content-plan.json", sets.canonical(plan))
     repo = project.parents[1]
     common = ["-EngineRoot", engine, "-Compiler", "Clang", "-LLVMRoot", args.llvm_root, "-MaxParallelActions", "1", "-NoDebugSymbols"]
-    editor = execute(["pwsh", "-NoProfile", "-File", repo / "Tools/Build-Project.ps1", "-Target", "Editor", *common], output / "editor-build.log")
-    native = execute(["pwsh", "-NoProfile", "-File", repo / "Tools/Build-Project.ps1", "-Target", "Game", *common], output / "game-build.log")
+    editor = execute(["pwsh", "-NoProfile", "-File", repo / project_integration.BUILD_SCRIPT, "-Target", "Editor", *common], output / "editor-build.log")
+    native = execute(["pwsh", "-NoProfile", "-File", repo / project_integration.BUILD_SCRIPT, "-Target", "Game", *common], output / "game-build.log")
     archive = output / "Archive"
-    cook = execute(["pwsh", "-NoProfile", "-File", repo / "Tools/Package-Project.ps1", "-EngineRoot", engine,
+    cook = execute(["pwsh", "-NoProfile", "-File", repo / project_integration.PACKAGE_SCRIPT, "-EngineRoot", engine,
                     "-Compiler", "Clang", "-LLVMRoot", args.llvm_root, "-ArchiveDirectory", archive, "-Platform", "Win64",
                     "-Configuration", "Development", "-MapList", "+".join(cook_maps),
                     "-CreateReleaseVersion", str(args.base_release_id), "-ReleaseVersionRoot", output / "CookReleases",
@@ -418,6 +421,11 @@ def main():
         candidate_cmd.add_argument("--" + flag, type=Path, required=True)
     candidate_cmd.add_argument("--release-id", type=int, required=True)
     args = parser.parse_args()
+    if args.command != "archive":
+        try:
+            project_integration.project_inputs(args.project, build=args.command == "build")
+        except project_integration.IntegrationError as error:
+            parser.error(str(error))
     print(json.dumps(dict(build=build, prepare=prepare, archive=archive, candidate=candidate)[args.command](args), ensure_ascii=False))
 
 

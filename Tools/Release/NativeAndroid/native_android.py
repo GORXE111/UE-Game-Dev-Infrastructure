@@ -26,6 +26,10 @@ BINDINGS = ('format', 'platform', 'packageName', 'channel', 'abi', 'baseReleaseI
 SKIP_DIRS = {'Binaries', 'Intermediate', 'Saved', 'DerivedDataCache', '.git', '__pycache__'}
 
 
+class IntegrationError(ValueError):
+    """The selected project is missing a required release integration input."""
+
+
 def require(ok, message):
     if not ok:
         raise ValueError('Native Android release: ' + message)
@@ -88,9 +92,12 @@ def loader_elf(path):
 
 
 def current_native_hash(project):
+    adapter = HERE / 'Read-NativeHash.ps1'
+    if not adapter.is_file():
+        raise IntegrationError(f'Install the project-owned Android native-source hash adapter at {adapter}.')
     shell = shutil.which('pwsh') or shutil.which('powershell')
     require(shell, 'PowerShell is required for the authoritative native-source fingerprint')
-    result = subprocess.run([shell, '-NoProfile', '-File', str(HERE / 'Read-NativeHash.ps1'),
+    result = subprocess.run([shell, '-NoProfile', '-File', str(adapter),
                              '-Project', str(project)], capture_output=True, text=True, encoding='utf-8', check=False)
     require(result.returncode == 0, 'authoritative native-source fingerprint failed')
     return hash_value(result.stdout.strip().lstrip('\ufeff'))
@@ -158,6 +165,11 @@ def base_paths(args):
     return project, output, bootstrap, record
 
 
+def require_certificate_pin():
+    if not re.fullmatch(r'[a-f0-9]{64}', CERTIFICATE_SHA256) or CERTIFICATE_SHA256 == '0' * 64:
+        raise IntegrationError('Configure CERTIFICATE_SHA256 with the approved Android public signing certificate digest.')
+
+
 def create_base(args):
     project, output, bootstrap_path, record_path = base_paths(args)
     require(not record_path.exists() and not bootstrap_path.exists(), 'base record/bootstrap already exist; allocate a new base instead of overwriting')
@@ -175,7 +187,11 @@ def create_base(args):
     identity['contentCompatibilityId'] = compatibility_id(identity, files)
     # Only the public release certificate enters the base APK. Keep update trust
     # stable when a cloud lab re-signs the APK with a different installer key.
-    certificate = (HERE / 'release-certificate.der').read_bytes()
+    require_certificate_pin()
+    certificate_path = HERE / 'release-certificate.der'
+    if not certificate_path.is_file():
+        raise IntegrationError(f'Install the matching public Android signing certificate in DER format at {certificate_path}.')
+    certificate = certificate_path.read_bytes()
     require(hashlib.sha256(certificate).hexdigest() == CERTIFICATE_SHA256,
             'embedded public release certificate differs from the frozen signer')
     bootstrap = dict(identity, enabled=bool(args.enabled), manifestUrl=args.manifest_url,
@@ -191,6 +207,7 @@ def create_base(args):
 
 
 def validate_base(args):
+    require_certificate_pin()
     project, output, bootstrap_path, record_path = base_paths(args)
     record = read(record_path)
     require(record.get('format') == 1 and record.get('signingCertificateSha256') == CERTIFICATE_SHA256, 'invalid base record or certificate binding')
@@ -356,15 +373,19 @@ def parser():
 
 
 def main():
-    args = parser().parse_args()
-    if args.action == 'create-base':
-        result = create_base(args)
-    elif args.action == 'publish':
-        require(all((args.proof, args.keystore, args.java_home)), 'publish requires proof, keystore and Java home')
-        result = publish(args)
-    else:
-        _, _, bootstrap, _, _ = validate_base(args)
-        result = dict(contentCompatibilityId=bootstrap['contentCompatibilityId'], compatible=True)
+    arguments = parser()
+    args = arguments.parse_args()
+    try:
+        if args.action == 'create-base':
+            result = create_base(args)
+        elif args.action == 'publish':
+            require(all((args.proof, args.keystore, args.java_home)), 'publish requires proof, keystore and Java home')
+            result = publish(args)
+        else:
+            _, _, bootstrap, _, _ = validate_base(args)
+            result = dict(contentCompatibilityId=bootstrap['contentCompatibilityId'], compatible=True)
+    except IntegrationError as error:
+        arguments.error(str(error))
     print(json.dumps(result, ensure_ascii=False))
 
 

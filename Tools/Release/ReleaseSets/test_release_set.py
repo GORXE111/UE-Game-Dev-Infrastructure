@@ -36,7 +36,7 @@ class ReleaseSetTests(unittest.TestCase):
         self.addCleanup(lambda: self.lease.__exit__(None, None, None))
         legacy = self.root / "legacy"
         legacy.mkdir()
-        (legacy / "ColaLabQuickSave.sav").write_bytes(b"original-v0-save")
+        (legacy / "SampleQuickSave.sav").write_bytes(b"original-v0-save")
         self.store.initialize(self.old, self.base, legacy)
         self.base_selection = self.store.boot()
         self.confirm(self.base_selection)
@@ -103,12 +103,12 @@ class ReleaseSetTests(unittest.TestCase):
     def test_unconfirmed_process_recovers_old_pair_and_old_saves(self):
         self.stage()
         candidate = self.store.activate(101)
-        (Path(candidate["savesRoot"]) / "ColaLabQuickSave.sav").write_bytes(b"migrated-in-failed-process")
+        (Path(candidate["savesRoot"]) / "SampleQuickSave.sav").write_bytes(b"migrated-in-failed-process")
         self.boot()  # Simulate a process that dies before its acknowledgement.
         recovered = self.boot()
         self.assert_pair(recovered, b"old")
-        self.assertEqual((Path(recovered["savesRoot"]) / "ColaLabQuickSave.sav").read_bytes(), b"original-v0-save")
-        self.assertEqual((Path(candidate["savesRoot"]) / "ColaLabQuickSave.sav").read_bytes(), b"migrated-in-failed-process")
+        self.assertEqual((Path(recovered["savesRoot"]) / "SampleQuickSave.sav").read_bytes(), b"original-v0-save")
+        self.assertEqual((Path(candidate["savesRoot"]) / "SampleQuickSave.sav").read_bytes(), b"migrated-in-failed-process")
         self.assertEqual(self.store._state()["blocked"], [101])
         self.assertEqual(self.store._state()["highestReleaseId"], 101)
 
@@ -143,11 +143,12 @@ class ReleaseSetTests(unittest.TestCase):
 
     def test_failed_staging_does_not_touch_active(self):
         source, raw = self.product(101, b"incomplete")
-        with patch.object(sets.shutil, "copyfileobj", side_effect=OSError("disk full")):
+        with patch.object(sets, "copy_verified_payload", side_effect=OSError("disk full")):
             with self.assertRaises(OSError):
                 self.store.stage(source, raw, self.key.sign(raw))
         self.assert_pair(self.boot(), b"old")
         self.assertFalse(self.store._path(101).exists())
+        self.assertFalse(list((self.store.root / "versions").glob("stage-*")))
 
     def test_low_disk_space_rejects_payload_without_changing_selection(self):
         source, raw = self.product(101, b"low-space")
@@ -252,8 +253,8 @@ class ReleaseSetTests(unittest.TestCase):
     def test_save_forks_are_independent_and_preserve_legacy_bytes(self):
         self.stage()
         selected = self.store.activate(101)
-        old = Path(self.base_selection["savesRoot"]) / "ColaLabQuickSave.sav"
-        new = Path(selected["savesRoot"]) / "ColaLabQuickSave.sav"
+        old = Path(self.base_selection["savesRoot"]) / "SampleQuickSave.sav"
+        new = Path(selected["savesRoot"]) / "SampleQuickSave.sav"
         self.assertNotEqual(old.parent, new.parent)
         self.assertEqual(old.read_bytes(), new.read_bytes())
         new.write_bytes(b"new-schema")
@@ -368,15 +369,15 @@ class ReleaseSetTests(unittest.TestCase):
     def test_interrupted_first_import_retries_without_overwriting_source_saves(self):
         target = sets.ReleaseSetStore(self.root / "new-baseline", self.trust, sets.ed25519_verifier(self.public))
         source = self.store.confirmed_save_source([0])["savesRoot"]
-        before = (Path(source) / "ColaLabQuickSave.sav").read_bytes()
+        before = (Path(source) / "SampleQuickSave.sav").read_bytes()
         with target.lease():
             with patch.object(sets, "atomic", side_effect=OSError("interrupted initial commit")):
                 with self.assertRaises(OSError):
                     target.initialize(self.old, self.base, source)
             self.assertFalse((target.root / "state.json").exists())
             selected = target.initialize(self.old, self.base, source)
-            self.assertEqual((Path(selected["savesRoot"]) / "ColaLabQuickSave.sav").read_bytes(), before)
-        self.assertEqual((Path(source) / "ColaLabQuickSave.sav").read_bytes(), before)
+            self.assertEqual((Path(selected["savesRoot"]) / "SampleQuickSave.sav").read_bytes(), before)
+        self.assertEqual((Path(source) / "SampleQuickSave.sav").read_bytes(), before)
 
 
 class CompatibilityTests(unittest.TestCase):

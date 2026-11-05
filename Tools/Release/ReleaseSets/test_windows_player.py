@@ -45,7 +45,7 @@ class WindowsPlayerTests(unittest.TestCase):
         return self.store.boot()
 
     @staticmethod
-    def subprocess_fixture(selected, *, status=0, health=True, wrong_pid=False, delay=0):
+    def subprocess_fixture(selected, *, status=0, health=True, wrong_pid=False, delay=0, hold=0):
         # An actual Python child models exit/ACK boundaries without pretending to execute the dummy EXE.
         def popen(arguments, **kwargs):
             path = Path(selected["payloadRoot"]).parents[1] / "boots" / selected["attemptId"] / "ticket.json"
@@ -56,9 +56,11 @@ if sys.argv[3]=='yes':
  a={k:t[k] for k in ('attemptId','releaseId','manifestSha256','buildId','saveSchema','userRoot')}
  a.update(format=1,pid=os.getpid()+int(sys.argv[4]),luaVersion='1.0.6')
  pathlib.Path(t['ackPath']).write_text(json.dumps(a))
+time.sleep(float(sys.argv[6]))
 sys.exit(int(sys.argv[5]))
 """
-            return subprocess.Popen([sys.executable, "-c", code, str(path), str(delay), "yes" if health else "no", "1" if wrong_pid else "0", str(status)], **kwargs)
+            return subprocess.Popen([sys.executable, "-c", code, str(path), str(delay), "yes" if health else "no",
+                                     "1" if wrong_pid else "0", str(status), str(hold)], **kwargs)
         return popen
 
     def test_signed_pair_downloads_and_activates_together(self):
@@ -66,7 +68,7 @@ sys.exit(int(sys.argv[5]))
         self.assertEqual(self.store._state()["active"]["releaseId"], 101)
         selected = self.store._selection(self.store._state()["active"])
         self.fixture.assert_pair(selected, b"new-pair")
-        self.assertEqual((Path(selected["savesRoot"]) / "ColaLabQuickSave.sav").read_bytes(), b"original-v0-save")
+        self.assertEqual((Path(selected["savesRoot"]) / "SampleQuickSave.sav").read_bytes(), b"original-v0-save")
 
     def test_corrupt_file_never_activates(self):
         files = self.product()
@@ -111,6 +113,15 @@ sys.exit(int(sys.argv[5]))
         selected = self.stage()
         with self.assertRaises(ValueError):
             player.launch(self.store, selected, popen=self.subprocess_fixture(selected, wrong_pid=True))
+        self.assertEqual(self.store._state()["active"]["releaseId"], 100)
+
+    def test_invalid_ack_file_does_not_disable_startup_timeout(self):
+        selected = self.stage()
+        start = self.subprocess_fixture(selected, wrong_pid=True, hold=5)
+        with self.assertRaisesRegex(ValueError, "valid startup health"):
+            player.launch(self.store, selected, popen=start, startup_timeout=1.5)
+        boot = self.store.root / "boots" / selected["attemptId"]
+        self.assertTrue((boot / "health.json").is_file())
         self.assertEqual(self.store._state()["active"]["releaseId"], 100)
 
     def test_startup_timeout_stops_only_our_child_before_releasing_lease(self):

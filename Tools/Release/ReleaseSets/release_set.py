@@ -201,7 +201,7 @@ def manifest(raw, trust):
     return value
 
 
-def verify_tree(root, records, metadata=()):
+def verify_inventory(root, records, metadata=()):
     root = Path(root)
     plain(root, True)
     expected = {item["path"] for item in records}
@@ -214,9 +214,31 @@ def verify_tree(root, records, metadata=()):
             plain(path)
             actual.add(path.relative_to(root).as_posix())
     require(actual == expected | set(metadata), "Release tree inventory differs from its signed manifest")
+
+
+def verify_tree(root, records, metadata=()):
+    verify_inventory(root, records, metadata)
     for item in records:
         path = child(root, item["path"])
         require(path.stat().st_size == item["size"] and digest(path) == item["sha256"], "Release artifact size/hash mismatch: " + item["path"])
+
+
+def copy_verified_payload(source, target, item):
+    """Check source bytes as they are copied into the private stage."""
+    plain(source)
+    expected = item["size"]
+    message = "Release artifact size/hash mismatch: " + item["path"]
+    require(source.stat().st_size == expected, message)
+    result, size = hashlib.sha256(), 0
+    with source.open("rb") as input_stream, target.open("xb") as output:
+        while block := input_stream.read(256 * 1024):
+            size += len(block)
+            require(size <= expected, message)
+            result.update(block)
+            output.write(block)
+        require(size == expected and result.hexdigest() == item["sha256"], message)
+        output.flush()
+        os.fsync(output.fileno())
 
 
 def copy_saves(source, destination):
@@ -378,29 +400,32 @@ class ReleaseSetStore:
 
     def _copy_version(self, source, raw, signature):
         value = manifest(raw, self.trust)
-        verify_tree(source, value["files"])
         destination = self._path(value["releaseId"])
         if destination.exists():
+            verify_tree(source, value["files"])
             require(read_bounded(child(destination, "manifest.json"), MAX_MANIFEST) == raw
                     and read_bounded(child(destination, "manifest.sig"), 8192, empty=True) == signature,
                     "Release IDs are immutable")
             self._read_version(value["releaseId"])
             return value
+        verify_inventory(source, value["files"])
         required = sum(item["size"] for item in value["files"]) + 32 * 1024**2
         require(shutil.disk_usage(self.root).free >= required, "Insufficient disk for a complete release set")
         temporary = child(child(self.root, "versions"), "stage-" + uuid.uuid4().hex)
         temporary.mkdir()
-        for item in value["files"]:
-            target = child(temporary, item["path"])
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with child(source, item["path"]).open("rb") as input_stream, target.open("xb") as output:
-                shutil.copyfileobj(input_stream, output, 256 * 1024)
-                output.flush()
-                os.fsync(output.fileno())
-        verify_tree(temporary, value["files"])
-        write_new(child(temporary, "manifest.json"), raw)
-        write_new(child(temporary, "manifest.sig"), signature)
-        os.replace(temporary, destination)
+        try:
+            for item in value["files"]:
+                target = child(temporary, item["path"])
+                target.parent.mkdir(parents=True, exist_ok=True)
+                copy_verified_payload(child(source, item["path"]), target, item)
+            verify_tree(temporary, value["files"])
+            write_new(child(temporary, "manifest.json"), raw)
+            write_new(child(temporary, "manifest.sig"), signature)
+            os.replace(temporary, destination)
+        except BaseException:
+            if temporary.exists():
+                shutil.rmtree(temporary)
+            raise
         self._read_version(value["releaseId"])
         return value
 

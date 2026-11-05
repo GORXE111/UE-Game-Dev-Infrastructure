@@ -252,23 +252,45 @@ def execute(action, args):
         CORE["plain"](directory, True)
         (directory / "releases").mkdir(exist_ok=True)
         CORE["plain"](directory / "releases", True)
-        require(not final.exists(), "Immutable release ID already exists")
-        previous = pointer(directory / "current")
-        require(previous is None or re.fullmatch(r"releases/[1-9][0-9]{0,8}", previous)
-                and plan["releaseId"] > int(previous.split("/")[1]), "A publication must advance the current release ID")
         lock = directory / ".publication.lock"
-        lock.mkdir()
+        lock.mkdir(mode=0o700)
         token = uuid.uuid4().hex
-        with (lock / "owner.json").open("xb") as stream:
-            stream.write(canonical({"token": token, "planSha256": hashlib.sha256(canonical(plan)).hexdigest()}))
-            stream.flush(); os.fsync(stream.fileno())
         stage_name = ".upload-" + str(plan["releaseId"]) + "-" + token
         stage = directory / "releases" / stage_name
-        stage.mkdir()
-        for name in plan["files"]:
-            (stage / name).parent.mkdir(parents=True, exist_ok=True)
-        fsync_dir(lock); fsync_dir(directory)
-        return {"token": token, "stageName": stage_name, "before": snapshot(plan)}
+        created_dirs = []
+        known_dirs = set()
+        lease_owner = lock / "owner.json"
+        try:
+            before = snapshot(plan)
+            require(not final.exists() and not final.is_symlink(), "Immutable release ID already exists")
+            previous = before["current"]
+            require(previous is None or re.fullmatch(r"releases/[1-9][0-9]{0,8}", previous)
+                    and plan["releaseId"] > int(previous.split("/")[1]), "A publication must advance the current release ID")
+            stage.mkdir(mode=0o700)
+            created_dirs.append(stage)
+            for name in plan["files"]:
+                parent = stage
+                for part in name.split("/")[:-1]:
+                    parent /= part
+                    if parent not in known_dirs:
+                        parent.mkdir()
+                        created_dirs.append(parent)
+                        known_dirs.add(parent)
+            with lease_owner.open("xb") as stream:
+                stream.write(canonical({"token": token, "planSha256": hashlib.sha256(canonical(plan)).hexdigest()}))
+                stream.flush()
+                os.fsync(stream.fileno())
+            fsync_dir(lock)
+            fsync_dir(directory)
+        except BaseException:
+            # The caller has not received the token and cannot resume this
+            # stage. Remove only the empty directories created by this call.
+            for created in reversed(created_dirs):
+                created.rmdir()
+            lease_owner.unlink(missing_ok=True)
+            lock.rmdir()
+            raise
+        return {"token": token, "stageName": stage_name, "before": before}
     token, before = args["token"], args["before"]
     require(isinstance(token, str) and re.fullmatch(r"[a-f0-9]{32}", token), "Invalid publication token")
     owner(directory, token, plan)

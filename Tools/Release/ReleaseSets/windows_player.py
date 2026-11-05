@@ -183,25 +183,30 @@ def launch(store, selected, user_args=(), popen=subprocess.Popen, startup_timeou
     ticket_path, expected = ticket(store, selected)
     arguments = game_arguments(selected, ticket_path, user_args)
     process = None
+    ack_path = Path(expected["ackPath"])
+
+    def read_acknowledgement():
+        value = json.loads(sets.read_bounded(ack_path, 8192).decode("utf-8"))
+        acknowledgement(value, expected, process.pid)
+        return value
+
     try:
         process = popen(windows_command(arguments) if os.name == "nt" else arguments, cwd=selected["payloadRoot"], close_fds=True)
         started = time.monotonic()
+        healthy = False
         while process.poll() is None:
-            if not Path(expected["ackPath"]).exists() and time.monotonic() - started > startup_timeout:
-                process.terminate()
+            if not healthy:
                 try:
-                    process.wait(timeout=15)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait()
-                raise ValueError("Game did not finish startup and save migration within its startup budget")
+                    read_acknowledgement()
+                    healthy = True
+                except (OSError, ValueError) as error:
+                    if time.monotonic() - started > startup_timeout:
+                        raise ValueError("Game did not provide valid startup health within its startup budget") from error
             time.sleep(.2)
         code = process.wait()
         sets.require(code == 0, "Selected game exited with status " + str(code))
         # Health AND a normal session exit are required. Exit 0 alone never commits a candidate.
-        raw = sets.read_bounded(expected["ackPath"], 8192)
-        value = json.loads(raw.decode("utf-8"))
-        acknowledgement(value, expected, process.pid)
+        value = read_acknowledgement()
         store.confirm(selected["attemptId"], expected["releaseId"], expected["manifestSha256"], value["saveSchema"])
         sets.atomic(ticket_path.parent / "result.json", dict(status="confirmed", exitCode=code, health=value))
         return code
@@ -397,14 +402,15 @@ def main(argv=None):
         if args.headless:
             return run(root, args.offline, user_args, args.import_user_root, import_release_root=args.import_release_root)
         config = read_config(root)
-        if (config["format"] == 2 and not (store_root(root, config) / "state.json").exists()
+        if (config["format"] == 2 and any(pin != "0" * 64 for pin in PREVIOUS_BASES.values())
+                and not (store_root(root, config) / "state.json").exists()
                 and not (root / ".release-sets/state.json").exists()
                 and args.import_user_root is None and args.import_release_root is None):
             import tkinter as tk
             from tkinter import filedialog, messagebox
             prompt = tk.Tk(); prompt.withdraw()
             try:
-                if messagebox.askyesno("接续游戏进度", "是否导入 V1.0.6 的游戏进度和设置？\n选择旧版 SampleGame.exe 所在文件夹。\n选择“否”将开始新进度，旧版数据仍会保留。", parent=prompt):
+                if messagebox.askyesno("接续游戏进度", "是否导入兼容旧版的游戏进度和设置？\n选择旧版 SampleGame.exe 所在文件夹。\n选择“否”将开始新进度，旧版数据仍会保留。", parent=prompt):
                     chosen = filedialog.askdirectory(title="选择旧版 SampleGame 所在文件夹", parent=prompt, mustexist=True)
                     if not chosen:
                         return 0

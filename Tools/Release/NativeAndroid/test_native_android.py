@@ -16,10 +16,22 @@ import native_android as tool
 
 
 class NativeReleaseGuards(unittest.TestCase):
+    CERTIFICATE_FIXTURE = b'public-certificate-test-fixture'
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix='native-release-tests-')
         self.addCleanup(temporary.cleanup)
         self.root = Path(temporary.name)
+        # These tests exercise byte binding and use a fake signer. The optional
+        # Java integration test below generates and signs with a temporary JKS.
+        (self.root / 'release-certificate.der').write_bytes(self.CERTIFICATE_FIXTURE)
+        for name, value in (
+            ('HERE', self.root),
+            ('CERTIFICATE_SHA256', hashlib.sha256(self.CERTIFICATE_FIXTURE).hexdigest()),
+        ):
+            patcher = patch.object(tool, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
         self.project = self.root / 'project'
         self.engine = self.root / 'engine'
         for folder in ('Source/Game', 'Config', 'Content/Release', 'Content/Developers/Local',
@@ -75,7 +87,7 @@ class NativeReleaseGuards(unittest.TestCase):
         return binary
 
     def fake_sign(self, args, payload, certificate):
-        certificate.write_bytes(b'public-certificate-test-fixture')
+        certificate.write_bytes(self.CERTIFICATE_FIXTURE)
         return b'unit-test-signature-only'
 
     def strip_fixture(self):

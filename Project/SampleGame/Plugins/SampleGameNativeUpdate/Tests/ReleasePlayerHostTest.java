@@ -82,7 +82,7 @@ public final class ReleasePlayerHostTest {
         records.put(new JSONObject().put("path", "Content/Paks/r" + release + "_SampleGame-Android.pak").put("role", "content").put("size", pak.length).put("sha256", ReleaseTransport.hash(pak)));
         records.put(new JSONObject().put("path", "libUnreal.so").put("role", "native").put("size", so.length).put("sha256", ReleaseTransport.hash(so)));
         JSONObject save = new JSONObject().put("schema", 1).put("readable", new JSONArray().put(0).put(1))
-                .put("migrations", new JSONArray().put(new JSONObject().put("from", 0).put("to", 1).put("id", "colalab-v0-to-v1")));
+                .put("migrations", new JSONArray().put(new JSONObject().put("from", 0).put("to", 1).put("id", "example-v0-to-v1")));
         JSONObject value = new JSONObject().put("format", 1).put("kind", "samplegame-release-set").put("projectId", "SampleGame")
                 .put("platform", "Android_ARM64").put("channel", "v106-test").put("baseReleaseId", 100)
                 .put("engineBuildId", "engine-build").put("shellCompatibilityId", "a".repeat(64)).put("releaseId", release)
@@ -122,6 +122,7 @@ public final class ReleasePlayerHostTest {
 
     private static final class TestActivity extends Activity {
         final File directory, apk;
+        boolean debuggable;
         TestActivity(String name, JSONObject config, JSONObject base, boolean corrupt) throws Exception {
             directory = new File(evidence, name).getCanonicalFile(); check(directory.mkdirs(), "Create independent host installation");
             apk = apk(directory, config, base, corrupt);
@@ -139,7 +140,12 @@ public final class ReleasePlayerHostTest {
         @Override public File getDir(String name, int mode) { return directory("private/" + name); }
         @Override public File getFilesDir() { return directory("files"); }
         @Override public File getExternalFilesDir(String type) { return directory("external"); }
-        @Override public ApplicationInfo getApplicationInfo() { ApplicationInfo value = new ApplicationInfo(); value.sourceDir = apk.getPath(); return value; }
+        @Override public ApplicationInfo getApplicationInfo() {
+            ApplicationInfo value = new ApplicationInfo();
+            value.flags = debuggable ? ApplicationInfo.FLAG_DEBUGGABLE : 0;
+            value.sourceDir = apk.getPath();
+            return value;
+        }
     }
 
     private static final class Response {
@@ -225,8 +231,17 @@ public final class ReleasePlayerHostTest {
         JSONObject noPrefix = new JSONObject(target.toString()); noPrefix.getJSONArray("files").getJSONObject(0).put("path", "Content/Paks/SampleGame-Android.pak");
         rejects(() -> ReleasePlayer.manifestPolicy(noPrefix), "Reject a PAK basename that could remount APK content");
 
+        reset(); TestActivity shipping = new TestActivity("shipping-external-extras", bootstrap, base, false);
+        shipping.getIntent().putExtra("cmdline", "-SampleGameBootExitAfterMenu=1 -pakdir=/external");
+        prepareLoad(shipping);
+        String shippingArguments = currentGameActivity.getIntent().getStringExtra("cmdline");
+        check(shippingArguments.contains("-SampleGameReleaseTicket=\"")
+                && !shippingArguments.contains("-SampleGameBootExitAfterMenu") && !shippingArguments.contains("/external"),
+                "A non-debuggable APK ignores external diagnostic and routing extras without blocking its managed launch");
+
         reset(); TestActivity healthy = new TestActivity("healthy", bootstrap, base, false);
-        File legacy = new File(healthy.getExternalFilesDir(null), "UnrealGame/SampleGame/SampleGame/Saved/SaveGames/ColaLabQuickSave.sav");
+        healthy.debuggable = true;
+        File legacy = new File(healthy.getExternalFilesDir(null), "UnrealGame/SampleGame/SampleGame/Saved/SaveGames/ExampleQuickSave.sav");
         legacy.getParentFile().mkdirs(); Files.write(legacy.toPath(), bytes("historical-save-bytes"));
         File oldConfig = new File(healthy.getExternalFilesDir(null), "UnrealGame/SampleGame/SampleGame/Saved/Config/Android/GameUserSettings.ini");
         oldConfig.getParentFile().mkdirs(); Files.write(oldConfig.toPath(), bytes("[GameSettings]\nSavedSetting=1\n"));
@@ -242,7 +257,7 @@ public final class ReleasePlayerHostTest {
         check(libraryLoads == beforeLoad + 1, "Exactly one loader invocation selects the verified native library");
         JSONObject selected = new JSONObject(ReleasePlayer.selectionJson());
         File selectedSaves = new File(selected.getString("userRoot"));
-        check(Arrays.equals(Files.readAllBytes(new File(selectedSaves, "Saved/SaveGames/ColaLabQuickSave.sav").toPath()), Files.readAllBytes(legacy.toPath())), "Import exact historical save bytes into selected private generation");
+        check(Arrays.equals(Files.readAllBytes(new File(selectedSaves, "Saved/SaveGames/ExampleQuickSave.sav").toPath()), Files.readAllBytes(legacy.toPath())), "Import exact historical save bytes into selected private generation");
         check(!new File(selectedSaves, "Saved/Logs").exists() && legacy.isFile(), "Import only SaveGames/Config; preserve original user data");
         check(Arrays.equals(Files.readAllBytes(new File(selectedSaves, "Saved/Config/Android/GameUserSettings.ini").toPath()), Files.readAllBytes(oldConfig.toPath())), "Preserve authored user settings together with save bytes");
         check(new String(Files.readAllBytes(new File(new File(selected.getString("ackPath")).getParentFile(), "ticket.json").toPath()), StandardCharsets.UTF_8).equals(ReleasePlayer.selectionJson()), "JNI selection exactly matches ticket bytes");
@@ -297,7 +312,7 @@ public final class ReleasePlayerHostTest {
         check(!incoming.exists() && new File(root, "ready.json").isFile()
                 && Arrays.equals(Files.readAllBytes(new File(root, "versions/101/libUnreal.so").toPath()), elf(101))
                 && Arrays.equals(Files.readAllBytes(new File(root, "versions/101/Content/Paks/r101_SampleGame-Android.pak").toPath()), bytes("paired-pak-101")), "Successful stage and ready commit discard only the redundant download; the full immutable pair remains intact");
-        check(new File(selectedSaves, "Saved/SaveGames/ColaLabQuickSave.sav").isFile() && new File(selected.getString("ackPath")).isFile(), "Download cleanup preserves the active save generation and boot health record");
+        check(new File(selectedSaves, "Saved/SaveGames/ExampleQuickSave.sav").isFile() && new File(selected.getString("ackPath")).isFile(), "Download cleanup preserves the active save generation and boot health record");
         Files.write(new File(root, "versions/101/Content/Paks/r101_SampleGame-Android.pak").toPath(), bytes("corrupt-after-download"));
         reset(); healthy.getIntent().putExtra("cmdline", ""); prepareLoad(healthy);
         check(new JSONObject(ReleasePlayer.selectionJson()).getLong("releaseId") == 100 && store().state().getLong("highestReleaseId") == 101
@@ -317,7 +332,7 @@ public final class ReleasePlayerHostTest {
         check(!new File(root, "incoming/r102").exists() && "ReadyToRestart".equals(new JSONObject(ReleasePlayer.statusJson()).getString("state")), "Retry commits readiness then removes its own complete incoming tree");
         reset(); healthy.getIntent().putExtra("cmdline", ""); prepareLoad(healthy);
         JSONObject newer = new JSONObject(ReleasePlayer.selectionJson()); check(newer.getLong("releaseId") == 102, "Next cold process activates an actually different native/content pair");
-        File newSave = new File(newer.getString("userRoot"), "Saved/SaveGames/ColaLabQuickSave.sav"); Files.write(newSave.toPath(), bytes("candidate-save-migration"));
+        File newSave = new File(newer.getString("userRoot"), "Saved/SaveGames/ExampleQuickSave.sav"); Files.write(newSave.toPath(), bytes("candidate-save-migration"));
         check(!newer.getString("userRoot").equals(selected.getString("userRoot")), "Activation forks a separate save generation");
         check(new String(Files.readAllBytes(legacy.toPath()), StandardCharsets.UTF_8).equals("historical-save-bytes"), "Candidate writes never change historical saves");
         reset(); serve(base); healthy.getIntent().putExtra("cmdline", ""); prepareLoad(healthy);
@@ -345,7 +360,7 @@ public final class ReleasePlayerHostTest {
                 && !ReleasePlayer.discardStagedIncoming(lockedIncoming, 104), "Cleanup rejects the store root, an immutable version, and a mismatched incoming release");
         check(Arrays.equals(Files.readAllBytes(new File(root, "state.json").toPath()), durableState)
                 && Arrays.equals(Files.readAllBytes(new File(root, "versions/103/libUnreal.so").toPath()), immutableNative)
-                && new File(selectedSaves, "Saved/SaveGames/ColaLabQuickSave.sav").isFile(), "Rejected scopes preserve actual state, immutable payload and all prior saves");
+                && new File(selectedSaves, "Saved/SaveGames/ExampleQuickSave.sav").isFile(), "Rejected scopes preserve actual state, immutable payload and all prior saves");
         check(ReleasePlayer.discardStagedIncoming(lockedIncoming, 103) && !lockedIncoming.exists(), "Deferred cache cleanup succeeds once the actual file handle is released");
         File alias = new File(root, "incoming/r104");
         try {
@@ -371,11 +386,12 @@ public final class ReleasePlayerHostTest {
 
         reset(); TestActivity ambiguous = new TestActivity("ambiguous-saves", bootstrap, base, false);
         for (File parent : new File[]{ambiguous.getFilesDir(), ambiguous.getExternalFilesDir(null)}) {
-            File old = new File(parent, "UnrealGame/SampleGame/SampleGame/Saved/SaveGames/ColaLabQuickSave.sav"); old.getParentFile().mkdirs(); Files.write(old.toPath(), bytes("unique-old-save"));
+            File old = new File(parent, "UnrealGame/SampleGame/SampleGame/Saved/SaveGames/ExampleQuickSave.sav"); old.getParentFile().mkdirs(); Files.write(old.toPath(), bytes("unique-old-save"));
         }
         rejects(() -> ReleasePlayer.prepareForLaunch(ambiguous), "Multiple historical save roots require explicit migration instead of guessing");
 
         reset(); TestActivity staleExtras = new TestActivity("stale-early-extras", bootstrap, base, false);
+        staleExtras.debuggable = true;
         staleExtras.getIntent().putExtra("cmdline", "-SampleGameSkipBoot"); ReleasePlayer.prepareForLaunch(staleExtras);
         Activity oldGameActivity = new Activity(); oldGameActivity.getIntent().putExtra("cmdline", "-SampleGameSkipBoot");
         int beforeStaleExtras = libraryLoads;

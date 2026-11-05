@@ -27,7 +27,9 @@ public final class ReleaseBootstrapActivity extends Activity {
         LinearLayout frame = new LinearLayout(this);
         frame.setOrientation(LinearLayout.VERTICAL); frame.setGravity(Gravity.CENTER);
         frame.setPadding(48, 48, 48, 48); frame.setBackgroundColor(Color.rgb(35, 40, 35));
-        TextView title = new TextView(this); title.setText("COLA LAB"); title.setTextSize(34);
+        TextView title = new TextView(this);
+        title.setText(getApplicationInfo().loadLabel(getPackageManager()));
+        title.setTextSize(34);
         title.setTextColor(Color.rgb(222, 255, 0)); title.setGravity(Gravity.CENTER);
         TextView status = new TextView(this); status.setText("正在准备游戏与存档…\n首次启动可能需要稍候");
         status.setTextSize(16); status.setTextColor(Color.rgb(250, 250, 235)); status.setGravity(Gravity.CENTER);

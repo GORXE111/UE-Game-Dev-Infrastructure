@@ -26,6 +26,7 @@ import compatibility
 import release_set as sets
 from windows_pipeline import COOK_MAPS, check_cook_maps, fresh_output, identity, map_inventory, producer_lease, validate_map_inventory
 import content_plan
+import project_integration
 import release_identity
 
 HERE = Path(__file__).resolve().parent
@@ -451,7 +452,7 @@ def build(args):
     # invoke MakeApk and retain their fresh external StageOnly output.
     quarantine = None if candidate_base is not None else quarantine_default_stage(project, output)
     repo = project.parents[1]
-    editor = execute(["pwsh", "-NoProfile", "-File", repo / "Tools/Build-Project.ps1", "-Target", "Editor",
+    editor = execute(["pwsh", "-NoProfile", "-File", repo / project_integration.BUILD_SCRIPT, "-Target", "Editor",
                       "-EngineRoot", editor_engine, "-Compiler", "Clang", "-LLVMRoot", args.llvm_root,
                       "-MaxParallelActions", "1", "-NoDebugSymbols"], output / "editor-build.log")
     env = dict(os.environ, ANDROID_HOME=str(args.sdk_root), ANDROID_SDK_ROOT=str(args.sdk_root),
@@ -461,7 +462,7 @@ def build(args):
                       "-remoteini=" + str(project), "-architecture=arm64", "-NoUBA", "-MaxParallelActions=1",
                       "-NoDebugInfo", "-NoLinkerDebugInfo", "-skipdeploy"], output / "android-native-build.log", env)
     archive = output / "Archive"
-    cook_arguments = ["pwsh", "-NoProfile", "-File", repo / "Tools/Package-Project.ps1", "-EngineRoot", engine,
+    cook_arguments = ["pwsh", "-NoProfile", "-File", repo / project_integration.PACKAGE_SCRIPT, "-EngineRoot", engine,
                     "-Compiler", "Clang", "-LLVMRoot", args.llvm_root, "-Platform", "Android", "-AndroidTextureFormat", "ASTC",
                     "-AndroidSdkRoot", args.sdk_root, "-AndroidNdkRoot", args.ndk_root, "-JavaHome", args.java_home,
                     "-ArchiveDirectory", archive, "-Configuration", "Development",
@@ -602,7 +603,9 @@ def validate_staged_build(proof, project, engine, baseline_apk):
     return stage, current, frozen
 
 
-def certificate(path=CERTIFICATE):
+def certificate(path=None):
+    path = CERTIFICATE if path is None else path
+    project_integration.require_public_certificate(path, CERTIFICATE_SHA256)
     from cryptography import x509
     from cryptography.hazmat.primitives.asymmetric import rsa
     raw = sets.read_bounded(path, 16384)
@@ -909,6 +912,13 @@ def main():
     for flag in ("player-apk", "output", "sdk-root", "java-home"):
         archive_cmd.add_argument("--" + flag, type=Path, required=True)
     args = parser.parse_args()
+    try:
+        if args.command != "archive":
+            project_integration.project_inputs(args.project, build=args.command == "build")
+        if args.command != "build" or args.candidate_base is not None:
+            project_integration.require_public_certificate(CERTIFICATE, CERTIFICATE_SHA256)
+    except project_integration.IntegrationError as error:
+        parser.error(str(error))
     result = dict(build=build, prepare=prepare, archive=archive, candidate=candidate)[args.command](args)
     print(json.dumps(result, ensure_ascii=False))
 

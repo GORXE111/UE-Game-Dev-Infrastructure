@@ -13,6 +13,10 @@ import release_set as sets
 import compatibility
 
 
+DISPLAY_ADAPTER = Path(__file__).resolve().parents[1] / "Site/prepare_release_display.py"
+requires_display_adapter = unittest.skipUnless(DISPLAY_ADAPTER.is_file(), "Requires the project-specific website display adapter")
+
+
 class ReleaseNotesTests(unittest.TestCase):
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
@@ -68,22 +72,22 @@ class ReleaseNotesTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "sections"):
             release_identity.snapshot(self.project)
 
+    @requires_display_adapter
     def test_site_cli_rejects_notes_not_matching_real_build_source(self):
-        root = Path(__file__).resolve().parents[1]
         proof = self.project / "proof.json"
         proof.write_text(json.dumps(dict(luaIdentity=release_identity.snapshot(self.project), sourceCommit="a" * 40, nativeSourceHash="b" * 64)), encoding="utf-8")
         manifest = self.project / "manifest.json"
         manifest.write_bytes(sets.canonical(dict(nativeSourceHash="b" * 64, sourceCommit="a" * 40)))
         self.value["headline"] += " changed"; self.write(self.value)
         output = self.project / "must-not-exist.json"
-        result = subprocess.run([sys.executable, "-B", str(root / "Site/prepare_release_display.py"), "--manifest", str(manifest),
+        result = subprocess.run([sys.executable, "-B", str(DISPLAY_ADAPTER), "--manifest", str(manifest),
                                  "--output", str(output), "--notes", str(self.source), "--build-proof", str(proof)], capture_output=True, text=True)
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Announcement does not match", result.stderr)
         self.assertFalse(output.exists())
 
+    @requires_display_adapter
     def test_site_cli_uses_the_same_cooked_notes_and_manifest_binding(self):
-        root = Path(__file__).resolve().parents[1]
         proof = self.project / "proof.json"
         proof.write_text(json.dumps(dict(luaIdentity=release_identity.snapshot(self.project), sourceCommit="a" * 40, nativeSourceHash="b" * 64)), encoding="utf-8")
         value = dict(format=1, kind="samplegame-release-set", projectId="SampleGame", platform="Windows", channel="test-pc",
@@ -94,7 +98,7 @@ class ReleaseNotesTests(unittest.TestCase):
         value["buildId"] = sets.build_id(value)
         manifest = self.project / "manifest.json"; manifest.write_bytes(sets.canonical(value))
         output = self.project / "display.json"
-        result = subprocess.run([sys.executable, "-B", str(root / "Site/prepare_release_display.py"), "--manifest", str(manifest),
+        result = subprocess.run([sys.executable, "-B", str(DISPLAY_ADAPTER), "--manifest", str(manifest),
                                  "--output", str(output), "--notes", str(self.source), "--build-proof", str(proof)], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stderr)
         display = json.loads(output.read_bytes())

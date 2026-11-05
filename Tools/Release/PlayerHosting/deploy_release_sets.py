@@ -111,14 +111,22 @@ def load(prepared):
 
 class Host(deploy_players.Host):
     def run(self, action, plan, **parameters):
-        players.require(sets.digest(CORE_PATH) == plan["coreSha256"]
-                        and sets.digest(Path(remote.__file__)) == plan["remoteScriptSha256"], "Verified remote implementation changed")
-        request = dict(action=action, plan=plan, core=base64.b64encode(CORE_PATH.read_bytes()).decode(), **parameters)
-        encoded = base64.b64encode(sets.canonical(request)).decode()
+        core = CORE_PATH.read_bytes()
+        worker = Path(remote.__file__).read_bytes()
+        players.require(hashlib.sha256(core).hexdigest() == plan["coreSha256"]
+                        and hashlib.sha256(worker).hexdigest() == plan["remoteScriptSha256"],
+                        "Verified remote implementation changed")
+        request = dict(action=action, plan=plan, core=base64.b64encode(core).decode("ascii"), **parameters)
+        encoded_request = base64.b64encode(sets.canonical(request)).decode("ascii")
+        encoded_worker = base64.b64encode(worker).decode("ascii")
         # Put the request in stdin; real complete manifests may exceed SSH's
-        # shell argument limits. The worker has only public inputs.
-        worker = Path(remote.__file__).read_bytes().replace(b"from __future__ import annotations\n", b"")
-        program = ("import base64,json\nREQUEST=json.loads(base64.b64decode('" + encoded + "'))\n").encode() + worker
+        # shell argument limits. Compile the exact verified worker separately
+        # to preserve its future imports even with a CRLF checkout.
+        program = (
+            "import base64, json\n"
+            f"REQUEST = json.loads(base64.b64decode({encoded_request!r}))\n"
+            f"exec(compile(base64.b64decode({encoded_worker!r}), '<release-worker>', 'exec'))\n"
+        ).encode("ascii")
         result = subprocess.run(["ssh", *self.options, "-p", str(self.port), self.host, "python3", "-"],
                                 input=program, capture_output=True, timeout=1800)
         players.require(result.returncode == 0, "Release-set SSH action failed: " + result.stderr.decode("utf-8", "replace"))

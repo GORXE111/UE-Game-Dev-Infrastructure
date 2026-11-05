@@ -1,0 +1,11 @@
+{
+  "FileVersion": 3,
+  "EngineAssociation": {{ENGINE_ASSOCIATION_JSON}},
+  "Modules": [
+    {
+      "Name": "{{PROJECT_NAME}}",
+      "Type": "Runtime",
+      "LoadingPhase": "Default"
+    }
+  ]
+}

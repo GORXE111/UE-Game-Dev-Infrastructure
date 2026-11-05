@@ -27,8 +27,9 @@ class Host:
         players.require(isinstance(host, str) and re.fullmatch(r"[A-Za-z0-9_@.][A-Za-z0-9_@.-]{0,253}", host), "Invalid SSH host")
         players.require(0 < port < 65536, "Invalid SSH port")
         self.host, self.port = host, port
-        self.options = ["-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "ConnectTimeout=20",
-                        "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=6", "-i", str(identity)]
+        self.options = ["-o", "BatchMode=yes", "-o", "IdentitiesOnly=yes", "-o", "StrictHostKeyChecking=yes",
+                        "-o", "ConnectTimeout=20", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=6",
+                        "-i", str(Path(identity).expanduser().resolve())]
 
     def run(self, action, plan, **parameters):
         payload = dict(action=action, plan=plan, **parameters)

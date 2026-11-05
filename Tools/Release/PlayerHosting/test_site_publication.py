@@ -8,6 +8,7 @@ import unittest
 from unittest.mock import patch
 
 SITE_SOURCE = Path(__file__).resolve().parents[1] / "Site"
+SITE_ADAPTER_AVAILABLE = all((SITE_SOURCE / name).is_file() for name in ("deploy_site.py", "remote_site.py"))
 
 
 def module(name, filename):
@@ -17,10 +18,12 @@ def module(name, filename):
     return value
 
 
-publisher = module("site_publisher_fixture", "deploy_site.py")
-remote = module("site_remote_fixture", "remote_site.py")
+if SITE_ADAPTER_AVAILABLE:
+    publisher = module("site_publisher_fixture", "deploy_site.py")
+    remote = module("site_remote_fixture", "remote_site.py")
 
 
+@unittest.skipUnless(SITE_ADAPTER_AVAILABLE, "Requires the project-specific website publisher and remote worker")
 class SitePublicationTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="samplegame-site-publication-fixture-")

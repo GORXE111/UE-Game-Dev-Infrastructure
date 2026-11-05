@@ -1,16 +1,17 @@
 # UE Game Development Infrastructure
 
-**A practical UE 5.8 game delivery stack: project scaffolding, signed native-and-content updates, PC/Android packaging, and a guarded release gateway.**
+**Unreal Engine project scaffolding and a reference delivery pipeline for signed Windows and Android updates.**
 
-这是一套从真实 UE5.8 游戏项目抽取并去标识的基础设施参考实现，覆盖插件脚手架、原生更新客户端、发行清单、Windows 与 Android 构建入口、服务器发布事务和回退设计。仓库不包含游戏、地图、美术资源、引擎源码、发行包、签名材料或线上服务器配置。
+从一个 UE 5.8 游戏项目抽取的基础设施。仓库提供可独立使用的 C++ 工程与插件脚手架，以及可在本机重现的签名、激活、回退演示。双端打包适配器与 Nginx 网关配置用于展示真实项目如何接入和交付。
 
 ## What is here
 
-- `Tools/Scaffold/` creates a small Unreal C++ plugin skeleton without overwriting existing files.
+- `Tools/Scaffold/` creates a minimal Unreal C++ project or plugin and publishes the generated files together.
+- `Tools/Release/ReleaseSets/demo_transaction.py` runs an offline signed release transaction with disposable files.
 - `Project/SampleGame/Plugins/SampleGameNativeUpdate/` contains the source-only UE plugin and Android bootstrap reference implementation.
 - `Tools/Release/ReleaseSets/` contains the signed release-set contract, compatibility checks, and Windows/Android package production code.
 - `Tools/Release/NativeWindows/` and `NativeAndroid/` contain native-update preparation and compatibility tooling. Production Windows keys and Android certificate pins are deliberately replaced with zero placeholders.
-- `Tools/Release/PlayerHosting/` and `NativeHosting/` contain staged, hash-verified publication tools and nginx route templates. The example host is `updates.example.com`; it is not a live service.
+- `Tools/Release/PlayerHosting/` and `NativeHosting/` contain staged publication tools and a sample HTTPS gateway with current manifests, immutable release files, and installer routes.
 
 The reference pipeline binds native binaries, cooked content, platform, channel, base build, engine identity, and save policy into one signed release. A client downloads into a private generation, checks every file, activates one code-and-content snapshot, and confirms it on the next cold start. An unhealthy or interrupted first boot returns to the prior snapshot and its matching save generation.
 
@@ -27,23 +28,37 @@ flowchart LR
     H -->|failure| J[Restore prior code, content, and save generation]
 ```
 
-## Start with the plugin scaffold
+## Try the scaffolds
 
 Run from this repository root in PowerShell:
 
 ```powershell
+pwsh -File .\Tools\Scaffold\New-UEProject.ps1 `
+  -ProjectName ExampleGame `
+  -OutputDirectory '.\local-projects\Example Game'
+
 pwsh -File .\Tools\Scaffold\New-UEPlugin.ps1 `
   -PluginName SampleGameplay `
-  -OutputDirectory .\Project\SampleGame\Plugins\SampleGameplay
+  -OutputDirectory '.\local-projects\Example Game\Plugins\SampleGameplay'
 ```
 
-The script writes a descriptor, Build.cs, and minimal module source. It refuses a non-empty destination. Add the generated plugin to a UE project and build it with that project's selected engine; this public template has not been built against every UE minor version.
+Open the generated `ExampleGame.uproject` with your installed editor. Both generators require a new destination. See [scaffold usage](Tools/Scaffold/README.md).
+
+## Try the update transaction
+
+From a Python 3.11+ environment with `cryptography` installed:
+
+```powershell
+python Tools/Release/ReleaseSets/demo_transaction.py
+```
+
+The demo uses the Python release store and fresh in-memory signing keys. It rejects a bad signature and altered payload, recovers the original save after an unconfirmed boot, and keeps a later confirmed release. It exercises both manifest layouts using inert fixtures.
 
 ## Important boundaries
 
-This repository is a **sanitized reference snapshot**, not a turnkey launcher or a promise that arbitrary C++ ABI changes can be hot-swapped. It illustrates cold-start native and content delivery for compatible installations. Engine changes, Android manifest/Java/UPL changes, signing identity changes, and unhandled save-schema changes require an explicit compatibility decision and may require a new full package.
+The delivery adapters target compatible installations and activate updates on restart. A new game supplies its build and cook scripts, trusted signing identities, and a UE readiness adapter. Android's bootstrap takes over the launcher when enabled and requires embedded release metadata. See [integration prerequisites](docs/packaging-and-publication.md) and [the health contract](docs/update-and-rollback.md).
 
-The source project completed Development PC and Android-emulator update/recovery qualification in its own private build environment. That evidence does not automatically qualify this renamed, sanitized export, Shipping builds, physical-phone performance, 16 KiB Android devices, or historical save files. See [verification scope](docs/verification-scope.md) before using the examples for a release.
+The original project's Development qualification covered Windows and an Android emulator. The public repository has its own scaffold and host checks. See [verification scope and remaining gaps](docs/verification-scope.md) for the evidence on each.
 
 ## Documentation
 

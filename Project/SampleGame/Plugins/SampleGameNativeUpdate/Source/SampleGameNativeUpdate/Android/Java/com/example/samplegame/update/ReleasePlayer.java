@@ -1,6 +1,7 @@
 package com.example.samplegame.update;
 
 import android.app.Activity;
+import android.content.pm.ApplicationInfo;
 import android.os.Process;
 import android.util.AtomicFile;
 import android.util.Base64;
@@ -278,7 +279,9 @@ public final class ReleasePlayer {
                 .put("ackPath", new File(boot, "health.json").getCanonicalPath());
         atomic(new File(boot, "ticket.json"), raw(ticket));
         ticketFile = new File(boot, "ticket.json");
-        qaArguments = activity.getIntent().getStringExtra("cmdline");
+        // The exported bootstrap Activity accepts diagnostic launch options only in debuggable builds.
+        qaArguments = (activity.getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0
+                ? activity.getIntent().getStringExtra("cmdline") : null;
         arguments(ticket, manifest, ticketFile, qaArguments); // Validate before another Activity starts.
         File library = new File(selected.getString("payloadRoot"), "libUnreal.so");
         JSONObject nativeRecord = nativeRecord(manifest);

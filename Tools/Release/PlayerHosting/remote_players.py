@@ -57,6 +57,12 @@ def sync_directory(path):
             os.close(descriptor)
 
 
+def seal_release(directory):
+    if directory.stat().st_mode & 0o777 != 0o555:
+        directory.chmod(0o555)
+    sync_directory(directory)
+
+
 def validate(plan):
     check(plan.get("schemaVersion") == 1, "Unsupported prepared format")
     identifier = plan.get("distributionId")
@@ -196,6 +202,7 @@ def execute(action, parameters):
                   "Concurrent players/current change")
             if action == "recover-commit" and final.exists():
                 verify(final, plan)
+                seal_release(final)
                 return {"committed": True, "recoveredExistingImmutableRelease": True, "release": str(final), "current": current}
             name = parameters["stageName"]
             check(re.fullmatch(r"\.upload-" + re.escape(identifier) + r"-[a-f0-9]{32}", name), "Unsafe staging identity")
@@ -207,9 +214,11 @@ def execute(action, parameters):
                     with path.open("rb") as stream:
                         os.fsync(stream.fileno())
                 path.chmod(0o444)
-            stage.chmod(0o555)
             sync_directory(stage)
+            # Moving a directory across parents on Linux requires write
+            # access to update its parent entry. Seal it after the rename.
             os.rename(stage, final)
+            seal_release(final)
             sync_directory(final.parent)
             sync_directory(ROOT)
             check(protected(plan) == before["protected"], "Protected state changed")

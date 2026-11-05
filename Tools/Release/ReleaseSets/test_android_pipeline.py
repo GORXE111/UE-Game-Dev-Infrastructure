@@ -646,6 +646,10 @@ class AndroidProducerTests(unittest.TestCase):
             operation.assert_not_called()
 
 
+PACKAGE_ADAPTER = Path(__file__).resolve().parents[2] / "Package-Project.ps1"
+requires_package_adapter = unittest.skipUnless(PACKAGE_ADAPTER.is_file(), "Requires the project-specific Package-Project.ps1 adapter")
+
+
 @unittest.skipUnless(__import__("os").name == "nt" and __import__("shutil").which("pwsh"), "PowerShell/Windows batch argument integration")
 class PackageProjectStageTests(unittest.TestCase):
     def setUp(self):
@@ -654,13 +658,13 @@ class PackageProjectStageTests(unittest.TestCase):
         self.engine = self.root / "synthetic-engine"
         batch = self.engine / "Engine/Build/BatchFiles/RunUAT.bat"; batch.parent.mkdir(parents=True)
         batch.write_text("@echo off\r\necho SYNTHETIC_UAT_ARGS %*\r\nexit /b 0\r\n")
-        self.script = Path(__file__).resolve().parents[2] / "Package-Project.ps1"
 
     def run_package(self, *arguments):
-        return subprocess.run(["pwsh", "-NoProfile", "-File", str(self.script), "-EngineRoot", str(self.engine),
+        return subprocess.run(["pwsh", "-NoProfile", "-File", str(PACKAGE_ADAPTER), "-EngineRoot", str(self.engine),
                                "-Compiler", "Clang", "-Platform", "Android", "-SkipEditorBuild", "-SkipGameBuild",
                                *[str(item) for item in arguments]], capture_output=True, text=True, encoding="utf-8", errors="replace")
 
+    @requires_package_adapter
     def test_stage_only_passes_real_cook_stage_pak_but_no_package_archive_or_deploy(self):
         result = self.run_package("-StageOnly", "-StagingDirectory", self.root / "fresh-stage")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -671,6 +675,7 @@ class PackageProjectStageTests(unittest.TestCase):
         for argument in ("-package", "-archive", "-deploy", "-skipcook", "-iterativecooking"):
             self.assertNotRegex(result.stdout, r"(?:^|\s)" + argument + r"(?:\s|$)")
 
+    @requires_package_adapter
     def test_baseline_default_still_packages_and_archives(self):
         result = self.run_package("-ArchiveDirectory", self.root / "archive")
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -706,6 +711,7 @@ class PackageProjectStageTests(unittest.TestCase):
                 finally:
                     link.rmdir()  # Remove only the temporary junction, never its target.
 
+    @requires_package_adapter
     def test_stage_only_rejects_missing_reused_or_incremental_output_before_uat(self):
         reused = self.root / "reused"; reused.mkdir()
         for arguments in (("-StageOnly",), ("-StageOnly", "-StagingDirectory", reused),
