@@ -1,0 +1,31 @@
+# Unreal-generated data
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+.vs/
+.idea/
+
+# Local credentials and release outputs
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.der
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.apk
+*.aab
+*.zip
+*.pak
+*.so
+*.dll
+*.exe
+*.partial
+release-output/
+coverage/
+__pycache__/
+*.py[cod]

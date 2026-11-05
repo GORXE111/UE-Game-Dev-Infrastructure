@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<root xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
+  <resourceCopies>
+    <copyDir src="$S(PluginDir)/Java" dst="$S(BuildDir)/src" />
+  </resourceCopies>
+  <androidManifestUpdates>
+    <loopElements tag="application">
+    <addAttribute tag="$" name="android:appComponentFactory" value="com.example.samplegame.update.ReleaseComponentFactory" />
+    <setStringFromAttribute result="ReleaseExistingToolsReplace" tag="$" name="tools:replace" />
+    <setBoolIsEqual result="ReleaseToolsReplaceEmpty" arg1="$S(ReleaseExistingToolsReplace)" arg2="" />
+    <if condition="ReleaseToolsReplaceEmpty">
+      <true><addAttribute tag="$" name="tools:replace" value="android:appComponentFactory" /></true>
+      <false>
+        <setStringAdd result="ReleaseCombinedToolsReplace" arg1="$S(ReleaseExistingToolsReplace)" arg2=",android:appComponentFactory" />
+        <addAttribute tag="$" name="tools:replace" value="$S(ReleaseCombinedToolsReplace)" />
+      </false>
+    </if>
+    </loopElements>
+    <!-- Verification/extraction runs on a worker before either UE Activity can
+         load native code. Keep all three Activities in the same app process. -->
+    <loopElements tag="activity">
+      <setStringFromAttribute result="ReleaseActivityName" tag="$" name="android:name" />
+      <setBoolIsEqual result="ReleaseSplash" arg1="$S(ReleaseActivityName)" arg2="com.epicgames.unreal.SplashActivity" />
+      <setBoolIsEqual result="ReleaseGame" arg1="$S(ReleaseActivityName)" arg2="com.epicgames.unreal.GameActivity" />
+      <setBoolOr result="ReleaseOriginalActivity" arg1="$B(ReleaseSplash)" arg2="$B(ReleaseGame)" />
+      <if condition="ReleaseOriginalActivity">
+        <true>
+          <addAttribute tag="$" name="android:exported" value="false" />
+          <loopElements tag="intent-filter">
+            <removeElement tag="$" />
+          </loopElements>
+        </true>
+      </if>
+    </loopElements>
+    <addElements tag="application">
+      <activity android:name="com.example.samplegame.update.ReleaseBootstrapActivity"
+                android:exported="true" android:label="@string/app_name"
+                android:theme="@android:style/Theme.Material.NoActionBar.Fullscreen"
+                android:launchMode="singleTask" android:screenOrientation="sensorLandscape"
+                android:configChanges="keyboardHidden|orientation|screenSize|screenLayout|smallestScreenSize|uiMode">
+        <intent-filter>
+          <action android:name="android.intent.action.MAIN" />
+          <category android:name="android.intent.category.LAUNCHER" />
+        </intent-filter>
+      </activity>
+    </addElements>
+  </androidManifestUpdates>
+  <soLoadUnreal>
+    <setString result="Output" value="" />
+    <insert><![CDATA[
+        com.example.samplegame.update.ReleasePlayer.loadUnreal(this, getClassLoader());
+]]></insert>
+  </soLoadUnreal>
+  <proguardAdditions>
+    <insert><![CDATA[
+-keep class com.example.samplegame.update.** { *; }
+]]></insert>
+  </proguardAdditions>
+</root>

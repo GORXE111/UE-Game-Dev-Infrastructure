@@ -1,0 +1,11 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "1.0",
+  "FriendlyName": "SampleGame Native Update",
+  "Description": "Signed Android cold-start native updates with base-library recovery.",
+  "Category": "Updates",
+  "CanContainContent": false,
+  "SupportedTargetPlatforms": ["Win64", "Android"],
+  "Modules": [{"Name": "SampleGameNativeUpdate", "Type": "Runtime", "LoadingPhase": "Default"}]
+}

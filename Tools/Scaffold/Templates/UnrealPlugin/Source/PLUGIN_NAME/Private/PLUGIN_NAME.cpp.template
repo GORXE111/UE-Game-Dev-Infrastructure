@@ -1,0 +1,15 @@
+#include "PLUGIN_NAME.h"
+
+#define LOCTEXT_NAMESPACE "F{{PLUGIN_NAME}}Module"
+
+void F{{PLUGIN_NAME}}Module::StartupModule()
+{
+}
+
+void F{{PLUGIN_NAME}}Module::ShutdownModule()
+{
+}
+
+IMPLEMENT_MODULE(F{{PLUGIN_NAME}}Module, {{PLUGIN_NAME}})
+
+#undef LOCTEXT_NAMESPACE

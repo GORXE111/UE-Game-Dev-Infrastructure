@@ -1,0 +1,9 @@
+{
+  "format": 1,
+  "requiredMaps": [
+    "/Game/SampleGame/Maps/UI/SettingsPreview",
+    "/Game/LD/level/PrototypeArena",
+    "/Game/Maps/CombatArena",
+    "/Game/SampleGame/Maps/Training/TrainingRange"
+  ]
+}

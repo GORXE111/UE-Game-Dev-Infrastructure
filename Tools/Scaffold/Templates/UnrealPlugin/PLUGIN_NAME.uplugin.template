@@ -1,0 +1,16 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "0.1.0",
+  "FriendlyName": "{{PLUGIN_NAME}}",
+  "Description": "A starter Unreal Engine plugin.",
+  "Category": "Gameplay",
+  "CanContainContent": false,
+  "Modules": [
+    {
+      "Name": "{{PLUGIN_NAME}}",
+      "Type": "{{PLUGIN_TYPE}}",
+      "LoadingPhase": "Default"
+    }
+  ]
+}
