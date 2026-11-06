@@ -1,0 +1,3 @@
+Name,Health,MoveSpeed,bCanSprint,DisplayName
+Scout,35,420.5,true,侦察兵
+Guard,80,280,false,守卫

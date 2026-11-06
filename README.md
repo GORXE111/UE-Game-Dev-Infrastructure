@@ -7,6 +7,8 @@
 ## What is here
 
 - `Tools/Scaffold/` creates a minimal Unreal C++ project or plugin and publishes the generated files together.
+- `Tools/ConfigTables/` validates CSV against a schema and exports Unreal DataTable JSON with a SHA-256 manifest. `Tools/AssetChecks/` checks declared assets in a real editor session.
+- `Jenkinsfile` calls the same local adoption gate used by developers. It tests config export, scaffolding and offline signed updates on a Windows worker.
 - `Tools/Release/ReleaseSets/demo_transaction.py` runs an offline signed release transaction with disposable files.
 - `Project/SampleGame/Plugins/SampleGameNativeUpdate/` contains the source-only UE plugin and Android bootstrap reference implementation.
 - `Tools/Release/ReleaseSets/` contains the signed release-set contract, compatibility checks, and Windows/Android package production code.
@@ -62,6 +64,8 @@ The original project's Development qualification covered Windows and an Android 
 
 ## Documentation
 
+- [Developer adoption roadmap](docs/developer-adoption.md)
+- [Config tables, asset checks and Jenkins](docs/config-and-ci.md)
 - [Architecture and boundaries](docs/architecture.md)
 - [Update and rollback model](docs/update-and-rollback.md)
 - [Packaging and publication](docs/packaging-and-publication.md)

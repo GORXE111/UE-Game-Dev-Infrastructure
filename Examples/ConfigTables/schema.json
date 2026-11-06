@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "tables": [
+    {
+      "name": "EnemyTuning",
+      "fields": [
+        {"name": "Health", "type": "int"},
+        {"name": "MoveSpeed", "type": "float"},
+        {"name": "bCanSprint", "type": "bool"},
+        {"name": "DisplayName", "type": "string"}
+      ]
+    },
+    {
+      "name": "GameplayTags",
+      "fields": [
+        {"name": "Tag", "type": "string"},
+        {"name": "DevComment", "type": "string"}
+      ]
+    }
+  ]
+}

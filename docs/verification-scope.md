@@ -9,6 +9,8 @@ The public export uses sample identifiers, an example domain and placeholder sig
 ## Public repository checks
 
 - PowerShell generated a C++ project and Runtime and Editor plugins at paths with spaces and Unicode. Two concurrent runs targeting one destination produced one complete tree and one refusal.
+- The local entry called by `Jenkinsfile` passed on Windows with a fresh output path containing a space. It ran four config-table checks, exported two tables, created a project and ran the signed offline demo for both platform layouts. A Jenkins controller run is a separate deployment check.
+- A PRO Max 5.8.3 Editor commandlet imported the generated Gameplay Tags JSON in a blank content project and checked both rows and their Chinese comments. A separate commandlet run loaded the saved DataTable through the Asset Registry and rejected a missing asset and an incorrect declared class.
 - The offline demo exercised Windows and Android file layouts through the Python release store. Both rejected a bad signature and modified content, recovered the previous save after an unconfirmed boot, and retained a later confirmed version.
 - Windows release-tool tests cover the Python store, launcher, native signing and hosting. The platform-dependent and omitted-project cases are reported as skips. The Windows launcher test uses a real child process with a mismatched health record to verify that the startup timeout still applies.
 - Ubuntu passed 46 gateway tests. An isolated Nginx 1.24.0 listener served real HTTPS responses for current manifests, full-file downloads, HEAD, Range and missing files. Write requests were denied.

@@ -27,6 +27,7 @@ DerivedDataCache/
 *.partial
 release-output/
 local-projects/
+ci-evidence/
 coverage/
 __pycache__/
 *.py[cod]
