@@ -58,7 +58,7 @@ pipeline {
 
     post {
         always {
-            archiveArtifacts artifacts: "ci-evidence/${env.BUILD_NUMBER}/report.json,ci-evidence/${env.BUILD_NUMBER}/*.log,ci-evidence/${env.BUILD_NUMBER}/ConfigTables/*.json,ci-evidence/${env.BUILD_NUMBER}/ProjectProfile/*.log,ci-evidence/${env.BUILD_NUMBER}/ProjectProfile/report.json,ci-evidence/${env.BUILD_NUMBER}/ProjectProfile/asset-report.json,ci-evidence/${env.BUILD_NUMBER}/ProjectProfile/cooked-assets.json,ci-evidence/${env.BUILD_NUMBER}/ProjectProfile/build-receipt.json,ci-evidence/${env.BUILD_NUMBER}/ProjectProfile/ConfigTables/manifest.json",
+            archiveArtifacts artifacts: "ci-evidence/${env.BUILD_NUMBER}/report.json,ci-evidence/${env.BUILD_NUMBER}/*.log,ci-evidence/${env.BUILD_NUMBER}/ConfigTables/*.json,ci-evidence/${env.BUILD_NUMBER}/ConfigTables/client/*.json,ci-evidence/${env.BUILD_NUMBER}/ProjectProfile/*.log,ci-evidence/${env.BUILD_NUMBER}/ProjectProfile/report.json,ci-evidence/${env.BUILD_NUMBER}/ProjectProfile/asset-report.json,ci-evidence/${env.BUILD_NUMBER}/ProjectProfile/cooked-assets.json,ci-evidence/${env.BUILD_NUMBER}/ProjectProfile/build-receipt.json,ci-evidence/${env.BUILD_NUMBER}/ProjectProfile/ConfigTables/manifest.json,ci-evidence/${env.BUILD_NUMBER}/ProjectProfile/ConfigTables/client/manifest.json",
                              allowEmptyArchive: true
         }
     }

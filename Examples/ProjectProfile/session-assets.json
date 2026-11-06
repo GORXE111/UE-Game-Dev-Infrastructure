@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "assets": [
+    {"path": "/Game/Generated/DT_GameplayTags.DT_GameplayTags", "class": "/Script/Engine.DataTable"},
+    {"path": "/Game/Generated/DT_Enemies.DT_Enemies", "class": "/Script/Engine.DataTable"},
+    {"path": "/Game/Generated/DT_Waves.DT_Waves", "class": "/Script/Engine.DataTable"}
+  ]
+}

@@ -83,6 +83,19 @@ try {
     $bundle = Join-Path $output 'ConfigTables'
     Invoke-Logged $python (Join-Path $output 'config-export.log') @('-X', 'utf8', '-B',
         (Join-Path $toolsRoot 'ConfigTables/config_tables.py'), '--source', $settings.configSource, '--output', $bundle)
+    $clientBundle = Join-Path $bundle 'client'
+    $sharedConfig = $null
+    if (Test-Path -LiteralPath $clientBundle -PathType Container) {
+        $serverManifest = Join-Path $bundle 'server/manifest.json'
+        $sharedConfig = (Get-Content -LiteralPath (Join-Path $clientBundle 'manifest.json') -Raw | ConvertFrom-Json).compatibilitySha256
+        $serverConfig = (Get-Content -LiteralPath $serverManifest -Raw | ConvertFrom-Json).compatibilitySha256
+        if ($sharedConfig -cnotmatch '^[a-f0-9]{64}$' -or $sharedConfig -cne $serverConfig) {
+            throw 'Client and server configuration identities differ.'
+        }
+        $report.sharedConfigSha256 = $sharedConfig
+        $report.serverConfigManifest = $serverManifest
+        $bundle = $clientBundle
+    }
     $manifest = Join-Path $bundle 'manifest.json'
     $report.configManifestSha256 = (Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash.ToLowerInvariant()
 
@@ -108,6 +121,13 @@ try {
     $packaging = @('', '[/Script/UnrealEd.ProjectPackagingSettings]', 'UsePakFile=True', 'bUseIoStore=False', 'bUseZenStore=False')
     foreach ($directory in ($settings.dataTables.asset | ForEach-Object { $_.Substring(0, $_.LastIndexOf('/')) } | Sort-Object -Unique)) {
         $packaging += ('+DirectoriesToAlwaysCook=(Path="' + $directory + '")')
+    }
+    if ($sharedConfig) {
+        $configMarkerDirectory = Join-Path $staged 'Content/GeneratedConfig'
+        if (Test-Path -LiteralPath $configMarkerDirectory) { throw 'Content/GeneratedConfig is reserved for generated profile data.' }
+        [IO.Directory]::CreateDirectory($configMarkerDirectory) | Out-Null
+        Set-Content -LiteralPath (Join-Path $configMarkerDirectory 'shared-config.sha256') -Value $sharedConfig -Encoding ascii
+        $packaging += '+DirectoriesToAlwaysStageAsUFS=(Path="GeneratedConfig")'
     }
     Add-Content -LiteralPath (Join-Path $config 'DefaultGame.ini') -Value $packaging
 

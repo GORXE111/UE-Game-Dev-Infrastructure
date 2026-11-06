@@ -60,7 +60,7 @@ print(f"Python {sys.version.split()[0]}, cryptography {cryptography.__version__}
     }
 
     $configTools = Join-Path $repository 'Tools/ConfigTables'
-    Invoke-Check 'config-tests' $python @('-X', 'utf8', '-B', '-m', 'unittest', 'discover', '-s', $configTools, '-p', 'test_config_tables.py', '-v') {
+    Invoke-Check 'config-tests' $python @('-X', 'utf8', '-B', '-m', 'unittest', 'discover', '-s', $configTools, '-p', 'test_*.py', '-v') {
         param($Log)
         if (-not (Select-String -LiteralPath $Log -Pattern '^Ran [1-9][0-9]* tests? in ' -Quiet)) {
             throw 'No configuration table tests ran. See config-tests.log.'

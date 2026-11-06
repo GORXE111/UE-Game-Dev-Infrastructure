@@ -23,6 +23,14 @@ python -X utf8 -B .\Tools\ConfigTables\config_tables.py `
 python -m pip install -r .\Tools\ConfigTables\requirements-xlsx.txt
 ```
 
+在表声明里加 `source` 可让同一个工作簿供应多张配置表。`file` 是配置源目录内的相对路径，`sheet` 是精确工作表名，`headerRow` 从 1 开始。下面可读取工作簿第 3 行的表头，前两行用于说明。
+
+```json
+"source": {"file": "Design/Balance.xlsx", "sheet": "敌人", "headerRow": 3}
+```
+
+字段可加 `"ref": "Enemies"`，要求该字符串精确匹配 `Enemies.Name` 的某一行。缺失引用会报告文件、工作表、行和字段。字段加 `"audience": "server"` 时只进入服务端产物。声明这些规则后会分别生成 `client/` 和 `server/`，两端清单的 `compatibilitySha256` 绑定共享字段和数据，服务端清单额外记录 `sourceSha256`。专有字段调整只影响服务端数据身份。双端数值按 UE 的 float32 表示统一，极小的非零值如果会变成零就报错。已有的单目录导出按原样使用。 [两张玩法表样例](../Examples/ProjectProfile/SessionTables/schema.json)
+
 ## UE 样板导入与资源检查
 
 准备已启用 `PythonScriptPlugin` 的空白项目。以下脚本在该样板中创建 `/Game/AdoptionSmoke/DT_AdoptionConfigSmoke`，验证导入和导出后的中文文本与行键一致。可将脚本复制到短英文路径，以便跨引擎安装使用。

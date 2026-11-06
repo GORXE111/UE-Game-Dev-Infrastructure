@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "tables": [
+    {"name": "GameplayTags", "fields": [{"name": "Tag", "type": "string"}, {"name": "DevComment", "type": "string"}]},
+    {"name": "Enemies", "fields": [
+      {"name": "Health", "type": "int"},
+      {"name": "DisplayName", "type": "string"},
+      {"name": "AiBudget", "type": "int", "audience": "server"}
+    ]},
+    {"name": "Waves", "fields": [
+      {"name": "EnemyId", "type": "string", "ref": "Enemies"},
+      {"name": "Count", "type": "int"}
+    ]}
+  ]
+}

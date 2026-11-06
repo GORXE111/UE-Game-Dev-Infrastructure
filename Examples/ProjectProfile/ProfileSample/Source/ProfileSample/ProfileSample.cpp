@@ -1,3 +1,5 @@
+#include "ProfileConfigRows.h"
+
 #include "Engine/DataTable.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
@@ -6,6 +8,7 @@
 #include "Misc/CommandLine.h"
 #include "Misc/CoreDelegates.h"
 #include "Misc/Parse.h"
+#include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
 #include "UObject/Package.h"
 
@@ -18,14 +21,42 @@ public:
         {
             EndFrame = FCoreDelegates::OnEndFrame.AddRaw(this, &FProfileSampleModule::CheckGame);
         }
+        if (FParse::Param(FCommandLine::Get(), TEXT("AdoptionSessionSmoke")))
+        {
+            PostEngineInit = FCoreDelegates::GetOnPostEngineInit().AddRaw(this, &FProfileSampleModule::WatchSession);
+        }
     }
 
     void ShutdownModule() override
     {
         FCoreDelegates::OnEndFrame.Remove(EndFrame);
+        FCoreDelegates::GetOnPostEngineInit().Remove(PostEngineInit);
+        if (NetworkFailure.IsValid() && GEngine)
+        {
+            GEngine->OnNetworkFailure().Remove(NetworkFailure);
+        }
     }
 
 private:
+    void WatchSession()
+    {
+        NetworkFailure = GEngine->OnNetworkFailure().AddRaw(this, &FProfileSampleModule::CheckSessionFailure);
+    }
+
+    void CheckSessionFailure(UWorld*, UNetDriver*, ENetworkFailure::Type FailureType, const FString& Error)
+    {
+        if (FailureType == ENetworkFailure::PendingConnectionFailure &&
+            Error.Equals(TEXT("ADOPTION_CONFIG_MISMATCH"), ESearchCase::CaseSensitive))
+        {
+            UE_LOG(LogTemp, Display, TEXT("UE_ADOPTION_SESSION_CLIENT_REJECTED"));
+            FPlatformMisc::RequestExit(false);
+            return;
+        }
+
+        UE_LOG(LogTemp, Error, TEXT("Unexpected adoption session failure: %s"), *Error);
+        FPlatformMisc::RequestExitWithStatus(true, 1);
+    }
+
     void CheckGame()
     {
         if (!GEngine)
@@ -51,6 +82,20 @@ private:
                     FPlatformMisc::RequestExitWithStatus(true, 1);
                     return;
                 }
+                if (FPaths::FileExists(FPaths::ProjectContentDir() / TEXT("GeneratedConfig/shared-config.sha256")))
+                {
+                    const UDataTable* Enemies = LoadObject<UDataTable>(nullptr, TEXT("/Game/Generated/DT_Enemies.DT_Enemies"));
+                    const UDataTable* Waves = LoadObject<UDataTable>(nullptr, TEXT("/Game/Generated/DT_Waves.DT_Waves"));
+                    const FProfileEnemyRow* Enemy = Enemies ? Enemies->FindRow<FProfileEnemyRow>(TEXT("Scout"), TEXT("ProfileSmoke")) : nullptr;
+                    const FProfileWaveRow* Wave = Waves ? Waves->FindRow<FProfileWaveRow>(TEXT("Opening"), TEXT("ProfileSmoke")) : nullptr;
+                    if (!Enemy || Enemy->Health != 35 || !Wave || Wave->EnemyId != TEXT("Scout") || Wave->Count != 2)
+                    {
+                        UE_LOG(LogTemp, Error, TEXT("Cooked gameplay tables did not contain the expected enemy and wave"));
+                        FPlatformMisc::RequestExitWithStatus(true, 1);
+                        return;
+                    }
+                    UE_LOG(LogTemp, Display, TEXT("UE_ADOPTION_CONFIG_TABLES_READY enemy=Scout health=35 wave=Opening count=2"));
+                }
                 UE_LOG(LogTemp, Display, TEXT("UE_PROJECT_PROFILE_READY map=/Engine/Maps/Entry table=GameplayTags rows=2"));
                 FPlatformMisc::RequestExit(false);
                 return;
@@ -59,6 +104,8 @@ private:
     }
 
     FDelegateHandle EndFrame;
+    FDelegateHandle PostEngineInit;
+    FDelegateHandle NetworkFailure;
 };
 
 IMPLEMENT_PRIMARY_GAME_MODULE(FProfileSampleModule, ProfileSample, "ProfileSample");

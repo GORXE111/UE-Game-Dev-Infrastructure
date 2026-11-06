@@ -51,3 +51,15 @@ python -X utf8 -B .\Tools\Adoption\build_receipt.py verify `
 ```
 
 回执替换、文件变化、缺失和新增都会使命令失败。签名阶段需使用刚校验的同一份不可变产物。
+
+## 双端配置和本机联机
+
+将 `-Profile` 改为 `Examples/ProjectProfile/network-profile.json`。此样板把敌人和波次表导出到客户端与服务端目录，检查波次引用的敌人存在，只把客户端数据导入 DataTable，并把共享配置摘要收入 PAK。客户端游戏启动时检查实际 Cook 的敌人和波次行。
+
+```powershell
+pwsh -NoProfile -File .\Tools\Adoption\Invoke-LoopbackSession.ps1 `
+  -ProfileReport C:\Work\UE-ProjectProfile-01\report.json `
+  -OutputDirectory C:\Work\UE-Loopback-01
+```
+
+样板用一个 Win64 游戏进程充当只监听 `127.0.0.1` 的主机，再启动客户端依次验证连入、配置不兼容拒绝和重新连入。成功连入须收到服务器 RPC，并与包内的共享摘要一致。脚本清理自己启动的测试进程，并留下主机和客户端日志。该报告标为 `win64-loopback-listen`。专用 Server 目标和服务端 JSON 实际加载按[专服预检](server-target.md)另验。

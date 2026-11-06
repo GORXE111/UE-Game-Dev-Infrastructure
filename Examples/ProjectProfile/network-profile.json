@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "project": "ProfileSample/ProfileSample.uproject",
+  "configSource": "SessionTables",
+  "assetPlan": "session-assets.json",
+  "dataTables": [
+    {"table": "GameplayTags", "asset": "/Game/Generated/DT_GameplayTags.DT_GameplayTags", "rowStruct": "/Script/GameplayTags.GameplayTagTableRow"},
+    {"table": "Enemies", "asset": "/Game/Generated/DT_Enemies.DT_Enemies", "rowStruct": "/Script/ProfileSample.ProfileEnemyRow"},
+    {"table": "Waves", "asset": "/Game/Generated/DT_Waves.DT_Waves", "rowStruct": "/Script/ProfileSample.ProfileWaveRow"}
+  ],
+  "build": {"target": "ProfileSample", "platform": "Win64", "configuration": "Development", "maps": ["/Engine/Maps/Entry"]},
+  "startup": {"map": "/Engine/Maps/Entry", "readyMarker": "UE_PROJECT_PROFILE_READY map=/Engine/Maps/Entry table=GameplayTags rows=2"}
+}

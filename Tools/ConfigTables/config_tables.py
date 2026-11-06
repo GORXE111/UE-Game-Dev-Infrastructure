@@ -7,11 +7,13 @@ import hashlib
 import json
 import math
 import os
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 import re
 import stat
 import struct
 from tempfile import TemporaryDirectory
+
+from table_contract import build_contract, parse_field_policy
 from xml.etree.ElementTree import ParseError
 from zipfile import BadZipFile
 
@@ -22,6 +24,8 @@ DECIMAL = re.compile(r"[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?
 RESERVED = {"manifest", "con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)),
             *(f"lpt{i}" for i in range(1, 10))}
 TYPES = {"bool", "float", "int", "string"}
+INVALID_PATH_CHARACTERS = re.compile(r'[:<>"|?*\x00-\x1f]')
+MAX_WORKSHEET_ROWS = 1_048_576
 
 
 def require(condition, message):
@@ -30,11 +34,15 @@ def require(condition, message):
 
 
 def input_file(root, name):
-    path = root / name
-    attributes = path.lstat()
-    require(stat.S_ISREG(attributes.st_mode) and
-            not getattr(attributes, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT,
-            f"{name}: expected a regular file in the source directory")
+    path = root
+    parts = Path(name).parts
+    for index, part in enumerate(parts):
+        path /= part
+        attributes = path.lstat()
+        expected = stat.S_ISREG if index == len(parts) - 1 else stat.S_ISDIR
+        require(expected(attributes.st_mode) and
+                not getattr(attributes, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT,
+                f"{name}: expected a regular file inside the source directory without links")
     return path
 
 
@@ -50,6 +58,30 @@ def identifier(value):
     return isinstance(value, str) and IDENTIFIER.fullmatch(value) is not None and value.lower() != "none"
 
 
+def source_options(table):
+    if "source" not in table:
+        return None
+    label = f"schema.json: {table['name']} source"
+    source = table["source"]
+    require(type(source) is dict and "file" in source and source.keys() <= {"file", "sheet", "headerRow"},
+            f"{label} needs file with optional sheet and headerRow")
+    filename = source["file"]
+    require(isinstance(filename, str), f"{label}.file must be a relative CSV or XLSX path")
+    parts = filename.replace("\\", "/").split("/")
+    require(all(part and part not in {".", ".."} and not part.endswith((" ", ".")) and
+                not INVALID_PATH_CHARACTERS.search(part) and not PureWindowsPath(part).is_reserved() for part in parts),
+            f"{label}.file must be a relative CSV or XLSX path inside the source directory")
+    path = Path(*parts)
+    require(path.suffix.lower() in {".csv", ".xlsx"}, f"{label}.file must name a CSV or XLSX file")
+    sheet = source.get("sheet")
+    require("sheet" not in source or (path.suffix.lower() == ".xlsx" and isinstance(sheet, str) and bool(sheet)),
+            f"{label}.sheet must be a nonempty XLSX worksheet name")
+    header_row = source.get("headerRow", 1)
+    require(type(header_row) is int and 1 <= header_row <= MAX_WORKSHEET_ROWS,
+            f"{label}.headerRow must be an integer from 1 to {MAX_WORKSHEET_ROWS}")
+    return path, sheet, header_row
+
+
 def load_schema(root):
     schema = json.loads(input_file(root, "schema.json").read_text(encoding="utf-8-sig"),
                         object_pairs_hook=unique_keys)
@@ -60,23 +92,28 @@ def load_schema(root):
     tables = {}
     used_tables = set()
     for table in schema["tables"]:
-        require(type(table) is dict and table.keys() == {"name", "fields"} and identifier(table["name"])
+        require(type(table) is dict and {"name", "fields"} <= table.keys() <= {"name", "fields", "source"}
+                and identifier(table["name"])
                 and type(table["fields"]) is list and table["fields"],
                 "schema.json: each table needs a valid name and a nonempty fields array")
         name = table["name"]
         require(name.lower() not in used_tables | RESERVED, f"schema.json: duplicate or reserved table {name!r}")
         used_tables.add(name.lower())
         fields = {}
+        policies = {}
         used_fields = {"name"}
         for field in table["fields"]:
-            require(type(field) is dict and field.keys() == {"name", "type"} and identifier(field["name"])
+            require(type(field) is dict and {"name", "type"} <= field.keys() <= {"name", "type", "audience", "ref"}
+                    and identifier(field["name"])
                     and isinstance(field["type"], str) and field["type"] in TYPES,
                     f"schema.json: {name} needs named fields of type bool, float, int or string")
             field_name = field["name"]
             require(field_name.lower() not in used_fields, f"schema.json: {name} has duplicate field {field_name!r}")
             used_fields.add(field_name.lower())
             fields[field_name] = field["type"]
-        tables[name] = fields
+            if "audience" in field or "ref" in field:
+                policies[field_name] = parse_field_policy(field, f"schema.json: {name}.{field_name}")
+        tables[name] = (fields, source_options(table), policies)
     return schema["version"], tables
 
 
@@ -104,61 +141,86 @@ def value_for(raw, kind, label):
     raise ValueError(f"{label}: expected {kind}")
 
 
-def csv_rows(path):
+def csv_rows(path, filename, header_row):
     with path.open(encoding="utf-8-sig", newline="") as stream:
+        for _ in range(header_row - 1):
+            if not stream.readline():
+                return
         reader = csv.reader(stream, strict=True)
         try:
             for cells in reader:
-                yield f"{path.name}:{reader.line_num}", cells
+                yield f"{filename}:{header_row - 1 + reader.line_num}", cells
         except csv.Error as error:
-            raise ValueError(f"{path.name}:{reader.line_num}: {error}") from error
+            raise ValueError(f"{filename}:{header_row - 1 + reader.line_num}: {error}") from error
 
 
-def xlsx_rows(path, name, width):
+def claim_source(used_sources, filename, sheet=None):
+    key = filename.casefold(), sheet.casefold() if sheet is not None else None
+    label = filename if sheet is None else f"{filename}!{sheet}"
+    require(key not in used_sources, f"{label}: the same source is already assigned to another table")
+    used_sources.add(key)
+
+
+def xlsx_rows(path, filename, name, width, sheet_name, header_row, used_sources):
     try:
         from defusedxml.common import DefusedXmlException
         from openpyxl import DEFUSEDXML, load_workbook
         from openpyxl.utils.exceptions import InvalidFileException
     except ImportError as error:
-        raise ValueError(f'{path.name}: install XLSX support with python -m pip install '
+        raise ValueError(f'{filename}: install XLSX support with python -m pip install '
                          '"openpyxl>=3.1,<4" "defusedxml>=0.7,<1"') from error
-    require(DEFUSEDXML, f"{path.name}: enable defusedxml in openpyxl for XLSX input")
+    require(DEFUSEDXML, f"{filename}: enable defusedxml in openpyxl for XLSX input")
 
     try:
         with path.open("rb") as stream, closing(load_workbook(
                 stream, read_only=True, data_only=False, keep_links=False)) as workbook:
             sheets = workbook.worksheets
-            sheet = next((entry for entry in sheets if entry.title.casefold() == name.casefold()), None)
-            if sheet is None and len(sheets) == 1:
-                sheet = sheets[0]
-            require(sheet is not None, f"{path.name}: use a worksheet named {name!r} or a workbook with one worksheet")
+            if sheet_name is not None:
+                sheet = next((entry for entry in sheets if entry.title == sheet_name), None)
+                require(sheet is not None, f"{filename}: worksheet {sheet_name!r} does not exist")
+            else:
+                sheet = next((entry for entry in sheets if entry.title.casefold() == name.casefold()), None)
+                if sheet is None and len(sheets) == 1:
+                    sheet = sheets[0]
+                require(sheet is not None, f"{filename}: use a worksheet named {name!r} or a workbook with one worksheet")
+            claim_source(used_sources, filename, sheet.title)
+            location = f"{filename}!{sheet.title}"
             # Some workbook writers leave a stale used range. Read the cells actually present.
             sheet.reset_dimensions()
-            for number, cells in enumerate(sheet.rows, 1):
+            for number, cells in enumerate(sheet.iter_rows(min_row=header_row), header_row):
                 for cell in cells:
                     if cell.data_type == "f":
-                        raise ValueError(f"{path.name}!{sheet.title}:{cell.coordinate}: replace formulas with literal values")
+                        raise ValueError(f"{location}:{cell.coordinate}: replace formulas with literal values")
                     if cell.data_type == "e":
-                        raise ValueError(f"{path.name}!{sheet.title}:{cell.coordinate}: resolve spreadsheet error {cell.value!r}")
+                        raise ValueError(f"{location}:{cell.coordinate}: resolve spreadsheet error {cell.value!r}")
                 values = [cell.value for cell in cells]
                 while values and values[-1] is None:
                     values.pop()
-                if number > 1 and values:
+                if number > header_row and values:
                     values.extend([None] * (width - len(values)))
-                yield f"{path.name}!{sheet.title}:{number}", ["" if value is None else value for value in values]
+                yield f"{location}:{number}", ["" if value is None else value for value in values]
     except (BadZipFile, DefusedXmlException, InvalidFileException, ParseError, IndexError, KeyError, TypeError) as error:
-        raise ValueError(f"{path.name}: could not read XLSX workbook ({error})") from error
+        raise ValueError(f"{filename}: could not read XLSX workbook ({error})") from error
 
 
-def load_rows(root, name, fields):
-    filenames = [f"{name}.csv", f"{name}.xlsx"]
-    available = [filename for filename in filenames if os.path.lexists(root / filename)]
-    require(len(available) == 1, f"{name}: provide exactly one of {filenames[0]} or {filenames[1]}")
-    path = input_file(root, available[0])
+def load_rows(root, name, fields, source, used_sources, locations=None):
+    if source is None:
+        filenames = [f"{name}.csv", f"{name}.xlsx"]
+        available = [filename for filename in filenames if os.path.lexists(root / filename)]
+        require(len(available) == 1, f"{name}: provide exactly one of {filenames[0]} or {filenames[1]}")
+        source = Path(available[0]), None, 1
+    relative, sheet, header_row = source
+    path = input_file(root, relative)
+    filename = relative.as_posix()
     header = ["Name", *fields]
     rows = {}
-    with closing(csv_rows(path) if path.suffix == ".csv" else xlsx_rows(path, name, len(header))) as records:
-        label, cells = next(records, (path.name, None))
+    if path.suffix.lower() == ".csv":
+        claim_source(used_sources, filename)
+        records = csv_rows(path, filename, header_row)
+    else:
+        records = xlsx_rows(path, filename, name, len(header), sheet, header_row, used_sources)
+    with closing(records):
+        label, cells = next(records, (f"{filename}:{header_row}", None))
         require(cells == header, f"{label}: header must match Name and schema fields")
         for label, cells in records:
             if not cells:
@@ -172,12 +234,26 @@ def load_rows(root, name, fields):
                 field: value_for(raw, kind, f"{label} ({field})")
                 for (field, kind), raw in zip(fields.items(), cells[1:])
             }}
-    require(bool(rows), f"{path.name}: Unreal DataTable needs at least one data row")
+            if locations is not None:
+                locations[row_name] = label
+    require(bool(rows), f"{filename}: Unreal DataTable needs at least one data row")
     return [rows[key] for key in sorted(rows)]
 
 
 def json_bytes(value):
     return (json.dumps(value, ensure_ascii=False, allow_nan=False, indent=2) + "\n").encode("utf-8")
+
+
+def render_bundle(version, rows_by_table, **identity):
+    manifest = {"schemaVersion": version, **identity, "files": {}}
+    payloads = {}
+    for name, rows in rows_by_table.items():
+        filename = name + ".json"
+        data = json_bytes(rows)
+        payloads[filename] = data
+        manifest["files"][filename] = {"sha256": hashlib.sha256(data).hexdigest(), "size": len(data), "rows": len(rows)}
+    payloads["manifest.json"] = json_bytes(manifest)
+    return manifest, payloads
 
 
 def export_tables(source, output=None):
@@ -191,22 +267,35 @@ def export_tables(source, output=None):
                 "Choose an output outside the source directory with an existing parent")
 
     version, tables = load_schema(source)
-    manifest = {"schemaVersion": version, "files": {}}
-    payloads = {}
+    rows_by_table = {}
+    locations = {}
+    used_sources = set()
     for name in sorted(tables, key=str.lower):
-        rows = load_rows(source, name, tables[name])
-        filename = name + ".json"
-        data = json_bytes(rows)
-        payloads[filename] = data
-        manifest["files"][filename] = {"sha256": hashlib.sha256(data).hexdigest(), "size": len(data), "rows": len(rows)}
+        fields, table_source, _ = tables[name]
+        locations[name] = {}
+        rows_by_table[name] = load_rows(source, name, fields, table_source, used_sources, locations[name])
+
+    if any(entry[2] for entry in tables.values()):
+        contract = build_contract(version, {name: entry[0] for name, entry in tables.items()},
+                                  {name: entry[2] for name, entry in tables.items()}, rows_by_table, locations)
+        identity = {"compatibilitySha256": contract.compatibility_sha256}
+        manifest, client = render_bundle(version, contract.client, **identity)
+        _, server = render_bundle(version, contract.server, **identity, sourceSha256=contract.source_sha256)
+        bundles = {"client": client, "server": server}
+        manifest = {**manifest, "layout": "client-server"}
+    else:
+        manifest, payloads = render_bundle(version, rows_by_table)
+        bundles = {"": payloads}
 
     if output is not None:
         with TemporaryDirectory(prefix=".config-tables-", dir=output.parent) as scratch:
             stage = Path(scratch) / "generated"
             stage.mkdir()
-            for name, data in payloads.items():
-                (stage / name).write_bytes(data)
-            (stage / "manifest.json").write_bytes(json_bytes(manifest))
+            for bundle, payloads in bundles.items():
+                directory = stage / bundle
+                directory.mkdir(exist_ok=True)
+                for name, data in payloads.items():
+                    (directory / name).write_bytes(data)
             require(not os.path.lexists(output), "Choose a new output directory")
             stage.rename(output)
     return manifest
@@ -214,7 +303,7 @@ def export_tables(source, output=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", type=Path, required=True, help="Directory containing schema.json and one CSV or XLSX per table")
+    parser.add_argument("--source", type=Path, required=True, help="Directory containing schema.json and its CSV or XLSX inputs")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--output", type=Path, help="New destination directory for JSON and its manifest")
     mode.add_argument("--check", action="store_true", help="Validate without writing files")

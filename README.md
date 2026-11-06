@@ -68,6 +68,7 @@ The original project's Development qualification covered Windows and an Android 
 - [Developer adoption roadmap](docs/developer-adoption.md)
 - [Config tables, asset checks and Jenkins](docs/config-and-ci.md)
 - [Win64 project profile and package acceptance](docs/project-profile.md)
+- [Win64 dedicated server capability check](docs/server-target.md)
 - [Architecture and boundaries](docs/architecture.md)
 - [Update and rollback model](docs/update-and-rollback.md)
 - [Packaging and publication](docs/packaging-and-publication.md)
