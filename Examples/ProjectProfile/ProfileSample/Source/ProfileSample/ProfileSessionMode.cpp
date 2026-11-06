@@ -7,6 +7,7 @@
 #include "Misc/FileHelper.h"
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
+#include "ProfileDedicatedConfig.h"
 #include "UObject/Package.h"
 
 namespace
@@ -33,6 +34,12 @@ namespace
         }
         return true;
     }
+
+    void RejectDedicatedConfig(const TCHAR* Reason)
+    {
+        UE_LOG(LogTemp, Error, TEXT("UE_ADOPTION_SESSION_DEDICATED_CONFIG_REJECTED %s"), Reason);
+        FPlatformMisc::RequestExitWithStatus(true, 1);
+    }
 }
 
 AProfileSessionMode::AProfileSessionMode()
@@ -47,18 +54,42 @@ void AProfileSessionMode::InitGame(const FString& MapName, const FString& Option
     {
         SharedConfigId.Reset();
         ErrorMessage = TEXT("ADOPTION_CONFIG_UNAVAILABLE");
+        if (IsRunningDedicatedServer())
+        {
+            RejectDedicatedConfig(TEXT("Missing or invalid cooked shared configuration identity"));
+        }
     }
 }
 
 void AProfileSessionMode::StartPlay()
 {
-    Super::StartPlay();
+    const UWorld* World = GetWorld();
     const ENetMode NetMode = GetNetMode();
-    if (SharedConfigId.IsEmpty() || (NetMode != NM_ListenServer && NetMode != NM_DedicatedServer))
+    if (SharedConfigId.IsEmpty() || !World || !World->GetNetDriver() ||
+        (NetMode != NM_ListenServer && NetMode != NM_DedicatedServer))
     {
         UE_LOG(LogTemp, Error, TEXT("Adoption session host did not start with a valid cooked configuration and net driver"));
         FPlatformMisc::RequestExitWithStatus(true, 1);
         return;
+    }
+    FProfileDedicatedConfigSummary DedicatedSummary;
+    if (NetMode == NM_DedicatedServer)
+    {
+        FString Error;
+        if (!LoadProfileDedicatedConfig(SharedConfigId, DedicatedSummary, Error))
+        {
+            SharedConfigId.Reset();
+            RejectDedicatedConfig(*Error);
+            return;
+        }
+    }
+
+    Super::StartPlay();
+    if (NetMode == NM_DedicatedServer)
+    {
+        UE_LOG(LogTemp, Display, TEXT("UE_ADOPTION_SESSION_DEDICATED_CONFIG_CONTENT enemies=%d waves=%d waveAiBudget=%lld"),
+            DedicatedSummary.EnemyCount, DedicatedSummary.WaveCount, DedicatedSummary.WaveAiBudget);
+        UE_LOG(LogTemp, Display, TEXT("UE_ADOPTION_SESSION_DEDICATED_CONFIG_READY shared=%s"), *SharedConfigId);
     }
     UE_LOG(LogTemp, Display, TEXT("UE_ADOPTION_SESSION_SERVER_READY shared=%s"), *SharedConfigId);
 }

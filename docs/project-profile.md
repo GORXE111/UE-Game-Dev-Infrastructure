@@ -62,4 +62,4 @@ pwsh -NoProfile -File .\Tools\Adoption\Invoke-LoopbackSession.ps1 `
   -OutputDirectory C:\Work\UE-Loopback-01
 ```
 
-样板用一个 Win64 游戏进程充当只监听 `127.0.0.1` 的主机，再启动客户端依次验证连入、配置不兼容拒绝和重新连入。成功连入须收到服务器 RPC，并与包内的共享摘要一致。脚本清理自己启动的测试进程，并留下主机和客户端日志。该报告标为 `win64-loopback-listen`。专用 Server 目标和服务端 JSON 实际加载按[专服预检](server-target.md)另验。
+样板用一个 Win64 游戏进程充当只监听 `127.0.0.1` 的主机，再启动客户端依次验证连入、配置不兼容拒绝和重新连入。成功连入须收到服务器 RPC，并与包内的共享摘要一致。脚本清理自己启动的测试进程，并留下主机和客户端日志。该报告标为 `win64-loopback-listen`。可复用这份客户端构建报告来[构建专用 Server 目标并验收服务端 JSON](server-target.md#运行独立样板)。
