@@ -59,7 +59,9 @@ if sys.argv[3]=='yes':
 time.sleep(float(sys.argv[6]))
 sys.exit(int(sys.argv[5]))
 """
-            return subprocess.Popen([sys.executable, "-c", code, str(path), str(delay), "yes" if health else "no",
+            # On Windows the venv redirector and its interpreter have different process IDs.
+            interpreter = Path(sys.base_prefix) / "python.exe" if sys.platform == "win32" else sys.executable
+            return subprocess.Popen([interpreter, "-c", code, str(path), str(delay), "yes" if health else "no",
                                      "1" if wrong_pid else "0", str(status), str(hold)], **kwargs)
         return popen
 

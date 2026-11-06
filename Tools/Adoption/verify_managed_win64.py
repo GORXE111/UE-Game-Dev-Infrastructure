@@ -85,7 +85,7 @@ def write_version(root, number, trust, build, key):
         source = sets.child(build["archive"], item["path"])
         destination = sets.child(payload, item["path"])
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, destination)
+        sets.copy_verified_payload(source, destination, item)
     sets.verify_inventory(payload, build["files"])
     manifest = dict(format=1, kind="samplegame-release-set", **{field: trust[field] for field in sets.BINDINGS},
                     releaseId=number, minLoaderVersion=1, sourceCommit=build["metadata"]["commit"],
@@ -94,9 +94,13 @@ def write_version(root, number, trust, build, key):
     manifest["buildId"] = sets.build_id(manifest)
     raw = sets.canonical(manifest)
     sets.manifest(raw, trust)
+    signature = key.sign(raw)
     sets.write_new(directory / "manifest.json", raw)
-    sets.write_new(directory / "manifest.json.sig", key.sign(raw))
-    return hashlib.sha256(raw).hexdigest()
+    sets.write_new(directory / "manifest.json.sig", signature)
+    metadata = {name: dict(size=len(data), sha256=hashlib.sha256(data).hexdigest())
+                for name, data in (("manifest.json", raw), ("manifest.json.sig", signature))}
+    metadata.update({f"payload/{item['path']}": item for item in build["files"]})
+    return metadata["manifest.json"]["sha256"], {f"versions/{number}/{name}": item for name, item in metadata.items()}
 
 
 def create_tls(root):
@@ -165,7 +169,10 @@ class TestOrigin:
                 with source.open("rb") as stream:
                     shutil.copyfileobj(stream, self.wfile, 256 * 1024)
 
-        self.server = ThreadingHTTPServer(("127.0.0.1", 443), Handler)
+        class LocalServer(ThreadingHTTPServer):
+            allow_reuse_address = False
+
+        self.server = LocalServer(("127.0.0.1", 443), Handler)
         self.server.socket = context.wrap_socket(self.server.socket, server_side=True)
         self.thread = Thread(target=self.server.serve_forever, daemon=True)
 
@@ -179,21 +186,23 @@ class TestOrigin:
         self.server.server_close()
 
 
-def verify_downloads(origin, ca_file, destination):
+def verify_downloads(origin, trusted, ca_file, destination):
+    sets.require(origin.files.keys() == trusted.keys(), "HTTPS inventory differs from the signed publication")
     opener = build_opener(ProxyHandler({}), HTTPSHandler(context=ssl.create_default_context(cafile=ca_file)))
     verified = []
-    for name, path in sorted(origin.files.items()):
+    for name, expected in sorted(trusted.items()):
         url = ORIGIN + PREFIX + name
         with opener.open(url, timeout=30) as response:
             sets.require(response.status == 200 and response.geturl() == url
                          and response.headers["Cache-Control"].endswith("immutable")
-                         and int(response.headers["Content-Length"]) == path.stat().st_size, "Unexpected HTTPS metadata")
+                         and int(response.headers["Content-Length"]) == expected["size"], "Unexpected HTTPS metadata")
             result = hashlib.sha256()
             size = 0
             for block in iter(lambda: response.read(1024 * 1024), b""):
                 size += len(block)
+                sets.require(size <= expected["size"], f"Oversized HTTPS file: {name}")
                 result.update(block)
-            sets.require(size == path.stat().st_size and result.hexdigest() == sets.digest(path),
+            sets.require(size == expected["size"] and result.hexdigest() == expected["sha256"],
                          f"Full HTTPS download differs: {name}")
             verified.append(dict(path=name, size=size, sha256=result.hexdigest()))
     sets.write_new(destination, sets.canonical(verified))
@@ -207,8 +216,17 @@ def launch(output, install, config, ca_file, name, expected_exit, game_role=None
     command = [sys.executable, "-X", "utf8", "-B", str(RELEASE_TOOLS / "windows_player.py"),
                "--root", str(install), "--headless", "--", "-NullRHI", "-NoSound", "-Unattended", "-NoSplash"]
     with (output / (name + ".log")).open("xb") as log:
-        result = subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, env=env, timeout=600)
-    sets.require(result.returncode == expected_exit, f"Unexpected launcher exit for {name}")
+        with subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, env=env) as process:
+            try:
+                exit_code = process.wait(timeout=600)
+            except subprocess.TimeoutExpired:
+                if process.poll() is None:
+                    taskkill = Path(os.environ["SystemRoot"]) / "System32" / "taskkill.exe"
+                    subprocess.run([taskkill, "/F", "/T", "/PID", str(process.pid)], stdout=log, stderr=subprocess.STDOUT)
+                    if process.poll() is None:
+                        process.kill()
+                raise
+    sets.require(exit_code == expected_exit, f"Unexpected launcher exit for {name}")
     attempts = set((state / "boots").glob("*")) - existing
     if game_role is None:
         sets.require(not attempts, "Untrusted metadata reached game startup")
@@ -253,8 +271,11 @@ def run(args, output, report):
     key = ed25519.Ed25519PrivateKey.generate()
     versions = output / "Versions"
     report["phase"] = "sign-receipt-payloads"
-    manifests = [write_version(versions, number, trust, build, key)
-                 for number, build in enumerate(builds, 100)]
+    manifests, trusted = [], {}
+    for number, build in enumerate(builds, 100):
+        manifest_hash, files = write_version(versions, number, trust, build, key)
+        manifests.append(manifest_hash)
+        trusted.update(files)
     trust["baseManifestSha256"] = manifests[0]
     report["manifestSha256"] = manifests
     install = output / "Installed"
@@ -264,17 +285,20 @@ def run(args, output, report):
         serialization.Encoding.Raw, serialization.PublicFormat.Raw).hex(),
                   manifestUrl=ORIGIN + PREFIX + "manifest.json", allowOffline=False)
     sets.write_new(install / "release-player.json", sets.canonical(config))
+    state_path = windows_player.store_root(install, config) / "state.json"
     report["phase"] = "full-https-download"
     context, ca_file = create_tls(output)
     with TestOrigin(versions, context) as origin:
-        report["verifiedDownloads"] = verify_downloads(origin, ca_file, output / "https-full-downloads.json")
+        report["verifiedDownloads"] = verify_downloads(origin, trusted, ca_file, output / "https-full-downloads.json")
         report["phase"] = "fresh-install"
         report["baseline"] = launch(output, install, config, ca_file, "baseline", 0, "baseline", 100)
         report["phase"] = "promotion-race"
         origin.requests.clear()
         origin.switch_after_manifest = 101
+        before = state_path.read_bytes()
         launch(output, install, config, ca_file, "mixed-generation", 1)
         sets.require(origin.requests == ["versions/100/manifest.json", "versions/101/manifest.json.sig"]
+                     and state_path.read_bytes() == before
                      and "signature rejected" in (output / "mixed-generation.log").read_text(encoding="utf-8").lower(),
                      "Mixed metadata did not fail closed before fetching payload")
         report["mixedGenerationRejected"] = True
@@ -285,8 +309,9 @@ def run(args, output, report):
         report["fault"] = launch(output, install, config, ca_file, "fault", 1, "fault", 102)
         report["recovered"] = launch(output, install, config, ca_file, "recovered", 0, "candidate", 101)
     old, candidate, fault, recovered = (report[key] for key in ("baseline", "candidate", "fault", "recovered"))
-    state = sets.parse((windows_player.store_root(install, config) / "state.json").read_bytes(), 65536)
+    state = sets.parse(state_path.read_bytes(), 65536)
     sets.require(old["save"] == candidate["save"] == recovered["save"] != fault["save"]
+                 and sets.digest(Path(old["saveRoot"]) / SAVE) == old["save"]
                  and candidate["saveRoot"] == recovered["saveRoot"]
                  and len({old["saveRoot"], candidate["saveRoot"], fault["saveRoot"]}) == 3
                  and state["active"]["releaseId"] == 101 and 102 in state["blocked"] and state["boot"] is None,

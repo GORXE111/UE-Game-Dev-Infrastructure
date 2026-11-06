@@ -310,6 +310,20 @@ class ReleaseSetTests(unittest.TestCase):
         value = sets.manifest(raw, trust)
         self.assertEqual({item["role"] for item in value["files"]}, {"native", "content"})
 
+    def test_windows_release_cannot_use_another_projects_content(self):
+        _, raw = self.product(101, b"independent-project")
+        trust = dict(self.trust, projectId="ProfileSample")
+        manifest = sets.parse(raw)
+        manifest["projectId"] = trust["projectId"]
+        for item in manifest["files"]:
+            item["path"] = item["path"].replace("SampleGame", "ProfileSample")
+        manifest["buildId"] = sets.build_id(manifest)
+        self.assertEqual(sets.manifest(sets.canonical(manifest), trust)["projectId"], "ProfileSample")
+        manifest["files"][-1]["path"] = "SampleGame/Content/Paks/Other.pak"
+        manifest["buildId"] = sets.build_id(manifest)
+        with self.assertRaisesRegex(ValueError, "outside the complete game tree"):
+            sets.manifest(sets.canonical(manifest), trust)
+
     def test_unsafe_paths_noncanonical_json_and_boolean_ids_rejected(self):
         for value in ("../escape", "x/../escape", "C:/absolute", "x\\y", "CON.txt", "/root", "x/./a", "x//a"):
             with self.subTest(path=value), self.assertRaises(ValueError):
