@@ -201,7 +201,7 @@ def zip_entries(archive):
 
 
 @contextmanager
-def apk_payload(apk):
+def apk_payload(apk, *, project_name="SampleGame"):
     """The OBB remains a seekable stream, avoiding a second ~500 MB RAM copy."""
     sets.plain(apk)
     with zipfile.ZipFile(apk) as outer:
@@ -214,18 +214,19 @@ def apk_payload(apk):
             with zipfile.ZipFile(embedded) as inner:
                 entries = zip_entries(inner)
                 pak_names = sorted(name for name in entries if name.endswith(".pak"))
-                sets.require(pak_names and all(re.fullmatch(r"SampleGame/Content/Paks/[A-Za-z0-9_.-]+\.pak", name)
+                pak_path = re.escape(project_name) + r"/Content/Paks/[A-Za-z0-9_.-]+\.pak"
+                sets.require(pak_names and all(re.fullmatch(pak_path, name)
                                                for name in pak_names), "OBB PAKs must be complete project PAK entries")
                 sets.require(not any(name.endswith((".utoc", ".ucas")) for name in entries), "IoStore requires a different frozen loader")
                 yield outer, inner, pak_names
 
 
-def payload_records(apk, release_id=None, destination=None):
+def payload_records(apk, release_id=None, destination=None, *, project_name="SampleGame"):
     """Bind every delivered native/PAK byte to its exact APK/OBB entry."""
     if release_id is not None:
         sets.number(release_id, 1)
     records, mapping = [], []
-    with apk_payload(apk) as (outer, inner, pak_names):
+    with apk_payload(apk, project_name=project_name) as (outer, inner, pak_names):
         sources = [("libUnreal.so", outer, NATIVE_ENTRY, "native", "")]
         for entry in pak_names:
             basename = PurePosixPath(entry).name
@@ -251,7 +252,7 @@ def obsolete_signature(name):
     return bool(re.fullmatch(r"META-INF/(?:MANIFEST\.MF|[^/]+\.(?:SF|RSA|DSA|EC))", name, re.IGNORECASE))
 
 
-def apk_shell_inventory(apk):
+def apk_shell_inventory(apk, *, project_name="SampleGame"):
     """Freeze APK dependencies and every OBB entry outside the switched PAK set."""
     result = []
     def record(archive, item, path):
@@ -259,7 +260,7 @@ def apk_shell_inventory(apk):
             size, digest = stream_digest(stream)
         result.append(dict(path=path, type="directory" if item.is_dir() else "file", size=size, sha256=digest))
 
-    with apk_payload(apk) as (archive, inner, pak_names):
+    with apk_payload(apk, project_name=project_name) as (archive, inner, pak_names):
         entries = zip_entries(archive)
         for name, item in sorted(entries.items()):
             if name in (NATIVE_ENTRY, OBB_ENTRY, CONFIG_ENTRY, MANIFEST_ENTRY, LEGACY_NATIVE_ENTRY) or obsolete_signature(name):

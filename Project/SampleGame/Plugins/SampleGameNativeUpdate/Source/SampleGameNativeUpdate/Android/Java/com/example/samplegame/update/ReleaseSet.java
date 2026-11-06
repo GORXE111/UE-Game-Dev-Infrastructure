@@ -231,7 +231,9 @@ public final class ReleaseSet {
                 "releaseId", "minLoaderVersion", "sourceCommit", "nativeSourceHash", "buildId", "files", "save");
         require(number(value.get("format"), 1, 1) == 1 && text(value, "kind").equals("samplegame-release-set"), "Unsupported release set");
         for (String name : BINDINGS) require(canonical(value.get(name)).equals(canonical(trust.get(name))), "Shell binding differs: " + name);
-        require(text(value, "projectId").equals("SampleGame") && text(value, "platform").equals("Android_ARM64"), "Expected Android game release set");
+        String project = text(value, "projectId");
+        require((project.equals("SampleGame") || project.equals("ProfileSample"))
+                && text(value, "platform").equals("Android_ARM64"), "Expected Android game release set");
         for (String name : new String[]{"projectId", "channel", "engineBuildId"}) require(token(text(value, name)), "Invalid identity token");
         sha(value.get("shellCompatibilityId"));
         number(value.get("baseReleaseId"), 1, MAX_NUMBER);

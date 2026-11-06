@@ -10,5 +10,9 @@ public class ProfileSample : ModuleRules
         {
             PublicSystemLibraries.Add("bcrypt.lib");
         }
+        if (Target.Platform == UnrealTargetPlatform.Android)
+        {
+            PrivateDependencyModuleNames.Add("PakFile");
+        }
     }
 }

@@ -103,10 +103,20 @@ private:
                 if (ReleaseResult != 0)
                 {
                     GLog->FlushThreadedLogs();
+#if PLATFORM_ANDROID
+                    FPlatformMisc::RequestExit(true);
+#else
                     FPlatformMisc::RequestExitWithStatus(true, ReleaseResult);
+#endif
                     return;
                 }
                 UE_LOG(LogTemp, Display, TEXT("UE_PROJECT_PROFILE_READY map=/Engine/Maps/Entry table=GameplayTags rows=2"));
+#if PLATFORM_ANDROID
+                if (bManagedBoot)
+                {
+                    return; // Keep the Java download worker alive after the confirmed game starts.
+                }
+#endif
                 FPlatformMisc::RequestExit(false);
                 return;
             }

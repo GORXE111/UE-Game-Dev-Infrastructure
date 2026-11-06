@@ -37,7 +37,40 @@ python -X utf8 -B .\Tools\Adoption\verify_managed_win64.py `
 
 The verifier needs Python 3.11+, `cryptography` and a free local TCP port 443. It rechecks all files against each build receipt and signs the verified runtime payload with a disposable key. A temporary CA is scoped to the test. The HTTPS listener binds only to `127.0.0.1`. The test checks every immutable download against the producer digest, rejects a manifest and signature read across a version switch, installs the good candidate, then starts a fault candidate that writes only to its own save generation before exiting. A subsequent launch must recover the good candidate and the byte-identical original save. Keep the resulting `report.json`, HTTPS download inventory, launcher logs and game boot receipts for review.
 
-This workflow covers the Win64 launcher from source and the actual packaged game on a local HTTPS origin. Production CDN, frozen installer, and Android APK and JNI readiness are separate qualification runs.
+This workflow covers the actual packaged game on a local HTTPS origin. Pass `--frozen-player <dist/SampleGameReleasePlayer>` to exercise the real onedir launcher built by `Tools/Release/ReleaseSets/Build-WindowsPlayer.ps1`. The verifier checks the installed launcher bytes. Public CDN qualification uses the production publisher's separate readback.
+
+## Verify the independent Android sample
+
+Use a full UE source engine with Android packaging tools, a matching Editor, the engine's Android SDK and NDK, and a dedicated API 36 emulator. The sample is ARM64 Development and cooks ETC2 PAKs into an embedded OBB. On an x86_64 emulator, check that the guest supports ARM64 translation. Use short, isolated output paths with space for the initial native build and three archives.
+
+Create the temporary TLS identity outside the checkout. Only `qa-ca.der` is copied into the test APK. Keep the TLS private key with the isolated server. The APK trusts that CA for `10.0.2.2`, the emulator's host loopback address, with cleartext disabled. A separate disposable RSA signer authenticates the APK and release manifests.
+
+```powershell
+New-Item -ItemType Directory D:\UEAndroidQA
+python -X utf8 -B .\Tools\Adoption\android_profile_release.py tls --output D:\UEAndroidQA\Tls
+
+foreach ($role in 'baseline', 'candidate', 'fault') {
+    pwsh -NoProfile -File .\Tools\Adoption\New-AndroidProfileSample.ps1 `
+      -ProfileReport D:\UEClient\report.json -OutputDirectory "D:\UEAndroidQA\Input-$role" `
+      -Variant $role -QaCaDer D:\UEAndroidQA\Tls\qa-ca.der
+    pwsh -NoProfile -File .\Tools\Adoption\Invoke-AndroidProfile.ps1 `
+      -Project "D:\UEAndroidQA\Input-$role\Project\ProfileSample.uproject" `
+      -EngineRoot $sourceEngine -EditorEngineRoot $editorEngine -SdkRoot $sdk -NdkRoot $ndk -JavaHome $jdk `
+      -OutputDirectory "D:\UEAndroidQA\Build-$role"
+}
+
+python -X utf8 -B .\Tools\Adoption\android_profile_release.py prepare `
+  --baseline D:\UEAndroidQA\Build-baseline\report.json `
+  --candidate D:\UEAndroidQA\Build-candidate\report.json `
+  --fault D:\UEAndroidQA\Build-fault\report.json `
+  --sdk $sdk --java-home $jdk --tls D:\UEAndroidQA\Tls --output D:\UEAndroidQA\Prepared
+
+python -X utf8 -B .\Tools\Adoption\verify_managed_android.py `
+  --adb "$sdk\platform-tools\adb.exe" --serial emulator-5588 --avd ProfileSampleAdoptionQA `
+  --prepared D:\UEAndroidQA\Prepared --tls D:\UEAndroidQA\Tls --output D:\UEAndroidQA\Evidence
+```
+
+Set the engine and toolchain paths before running the commands. If the Editor needs Clang, pass `-ClangRoot` to the profile builder. Use an unused emulator serial and a clean, dedicated AVD. The runtime verifier refuses an existing sample installation. It serves the signed versions only on host loopback and uses the sample's app-private state to check health, activation, failed boot and recovery. Release IDs 100–102 belong to this test channel.
 
 ## Compatibility policy
 

@@ -35,6 +35,8 @@ import java.util.zip.ZipInputStream;
 /** Development APK release-set shell. Native code, full PAK set and saves move together. */
 public final class ReleasePlayer {
     private static final String TAG = "SampleGameReleasePlayer";
+    private static final String PROFILE_PROJECT = "ProfileSample";
+    private static final String PROFILE_PACKAGE = "com.example.profilesample.adoption";
     private static ReleaseSet.Store store;
     private static JSONObject config, selected, ticket;
     private static ReleaseSet.Verifier verifier;
@@ -131,6 +133,8 @@ public final class ReleasePlayer {
         JSONObject trust = value.getJSONObject("trust");
         keys(trust, "projectId", "platform", "channel", "baseReleaseId", "engineBuildId", "shellCompatibilityId", "loaderVersion", "baseManifestSha256");
         require("Android_ARM64".equals(trust.getString("platform")), "Android release platform required");
+        require(PROFILE_PROJECT.equals(trust.getString("projectId")) == PROFILE_PACKAGE.equals(value.getString("packageName")),
+                "ProfileSample trust and its isolated Android package must be paired");
         ReleaseSet.number(trust.get("loaderVersion"), 1, 1);
         require(trust.getString("baseManifestSha256").matches("[a-f0-9]{64}"), "Missing pinned base manifest hash");
         ReleaseSet.parse(ReleaseSet.canonical(trust).getBytes(StandardCharsets.UTF_8), ReleaseSet.MAX_MANIFEST);
@@ -244,8 +248,11 @@ public final class ReleasePlayer {
             JSONObject base = ReleaseSet.manifest(baseRaw, trust); manifestPolicy(base);
             File extraction = ReleaseTransport.child(root, "base-extraction");
             extractBase(new File(activity.getApplicationInfo().sourceDir), extraction, config, base);
-            File legacy = previousBaseSnapshot(privateRoot, root, base);
-            if (legacy == null) legacy = legacySnapshot(activity, root);
+            File legacy = null;
+            if (!PROFILE_PROJECT.equals(trust.getString("projectId"))) {
+                legacy = previousBaseSnapshot(privateRoot, root, base);
+                if (legacy == null) legacy = legacySnapshot(activity, root);
+            }
             store.initialize(extraction, baseRaw, legacy);
             removeExtraction(extraction);
             if (legacy != null) removeExtraction(legacy);
@@ -499,10 +506,12 @@ public final class ReleasePlayer {
             keys(ack, "format", "attemptId", "releaseId", "manifestSha256", "buildId", "saveSchema", "pid", "userRoot", "luaVersion");
             ReleaseSet.number(ack.get("format"), 1, 1);
             for (String key : new String[]{"attemptId", "manifestSha256", "buildId", "userRoot"}) require(ack.getString(key).equals(ticket.getString(key)), "Health selection mismatch: " + key);
+            String luaVersion = ack.getString("luaVersion");
+            boolean profileSample = PROFILE_PROJECT.equals(config.getJSONObject("trust").getString("projectId"));
             require(ReleaseSet.number(ack.get("releaseId"), 1, 9007199254740991L) == ticket.getLong("releaseId")
                     && ReleaseSet.number(ack.get("saveSchema"), 0, 10000) == ticket.getLong("saveSchema")
                     && ReleaseSet.number(ack.get("pid"), 1, Integer.MAX_VALUE) == Process.myPid()
-                    && version(ack.getString("luaVersion")), "Health runtime identity differs");
+                    && (profileSample ? "not-applicable".equals(luaVersion) : version(luaVersion)), "Health runtime identity differs");
             // Preserve an actual health record before the single durable transaction confirms.
             atomic(new File(ticket.getString("ackPath")), raw(ack));
             store.confirm(ticket.getString("attemptId"), ticket.getLong("releaseId"), ticket.getString("manifestSha256"), ticket.getLong("saveSchema"));

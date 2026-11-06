@@ -4,7 +4,20 @@
     <copyDir src="$S(PluginDir)/Java" dst="$S(BuildDir)/src" />
   </resourceCopies>
   <androidManifestUpdates>
+    <!-- The isolated ProfileSample harness supplies these public CA resources in its
+         scratch project's Build/Android/res. All other APKs keep default TLS trust. -->
+    <setBoolFromProperty result="ProfileSampleQaTlsRequested" ini="Engine" section="/Script/AndroidRuntimeSettings.AndroidRuntimeSettings" property="bProfileSampleQaTls" default="false" />
+    <setBoolIsEqual result="ProfileSampleQaPackage" arg1="$S(AndroidPackageName)" arg2="com.example.profilesample.adoption" />
+    <setBoolIsEqual result="ProfileSampleQaDevelopment" arg1="$S(Configuration)" arg2="Development" />
+    <setBoolAnd result="ProfileSampleQaAllowed" arg1="$B(ProfileSampleQaPackage)" arg2="$B(ProfileSampleQaDevelopment)" />
+    <setBoolAnd result="ProfileSampleQaTlsEnabled" arg1="$B(ProfileSampleQaAllowed)" arg2="$B(ProfileSampleQaTlsRequested)" />
+    <isDistribution>
+      <setBool result="ProfileSampleQaTlsEnabled" value="false" />
+    </isDistribution>
     <loopElements tag="application">
+    <if condition="ProfileSampleQaTlsEnabled">
+      <true><addAttribute tag="$" name="android:networkSecurityConfig" value="@xml/profilesample_qa_network_security" /></true>
+    </if>
     <addAttribute tag="$" name="android:appComponentFactory" value="com.example.samplegame.update.ReleaseComponentFactory" />
     <setStringFromAttribute result="ReleaseExistingToolsReplace" tag="$" name="tools:replace" />
     <setBoolIsEqual result="ReleaseToolsReplaceEmpty" arg1="$S(ReleaseExistingToolsReplace)" arg2="" />

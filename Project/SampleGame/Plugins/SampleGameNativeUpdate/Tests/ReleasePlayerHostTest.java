@@ -77,13 +77,17 @@ public final class ReleasePlayerHostTest {
     }
 
     private static JSONObject manifest(long release) throws Exception {
+        return manifest(release, "SampleGame");
+    }
+
+    private static JSONObject manifest(long release, String project) throws Exception {
         JSONArray records = new JSONArray();
         byte[] pak = bytes("paired-pak-" + release), so = elf((int) release);
-        records.put(new JSONObject().put("path", "Content/Paks/r" + release + "_SampleGame-Android.pak").put("role", "content").put("size", pak.length).put("sha256", ReleaseTransport.hash(pak)));
+        records.put(new JSONObject().put("path", "Content/Paks/r" + release + "_" + project + "-Android.pak").put("role", "content").put("size", pak.length).put("sha256", ReleaseTransport.hash(pak)));
         records.put(new JSONObject().put("path", "libUnreal.so").put("role", "native").put("size", so.length).put("sha256", ReleaseTransport.hash(so)));
         JSONObject save = new JSONObject().put("schema", 1).put("readable", new JSONArray().put(0).put(1))
                 .put("migrations", new JSONArray().put(new JSONObject().put("from", 0).put("to", 1).put("id", "example-v0-to-v1")));
-        JSONObject value = new JSONObject().put("format", 1).put("kind", "samplegame-release-set").put("projectId", "SampleGame")
+        JSONObject value = new JSONObject().put("format", 1).put("kind", "samplegame-release-set").put("projectId", project)
                 .put("platform", "Android_ARM64").put("channel", "v106-test").put("baseReleaseId", 100)
                 .put("engineBuildId", "engine-build").put("shellCompatibilityId", "a".repeat(64)).put("releaseId", release)
                 .put("minLoaderVersion", 1).put("sourceCommit", "b".repeat(40)).put("nativeSourceHash", (release == 100 ? "c" : "d").repeat(64))
@@ -95,11 +99,13 @@ public final class ReleasePlayerHostTest {
         JSONObject trust = new JSONObject();
         for (String name : new String[]{"projectId", "platform", "channel", "baseReleaseId", "engineBuildId", "shellCompatibilityId"}) trust.put(name, base.get(name));
         trust.put("loaderVersion", 1).put("baseManifestSha256", ReleaseTransport.hash(bytes(ReleaseSet.canonical(base))));
+        String project = base.getString("projectId");
+        String appPackage = project.equals("ProfileSample") ? "com.example.profilesample.adoption" : "com.example.samplegame";
         JSONArray entries = new JSONArray()
                 .put(new JSONObject().put("path", "libUnreal.so").put("apkPath", "lib/arm64-v8a/libUnreal.so").put("obbPath", ""))
                 .put(new JSONObject().put("path", base.getJSONArray("files").getJSONObject(0).getString("path"))
-                        .put("apkPath", "assets/main.obb.png").put("obbPath", "SampleGame/Content/Paks/SampleGame-Android.pak"));
-        return new JSONObject().put("format", 1).put("trust", trust).put("packageName", "com.example.samplegame")
+                        .put("apkPath", "assets/main.obb.png").put("obbPath", project + "/Content/Paks/" + project + "-Android.pak"));
+        return new JSONObject().put("format", 1).put("trust", trust).put("packageName", appPackage)
                 .put("manifestUrl", ENDPOINT).put("allowOffline", true).put("signatureAlgorithm", "SHA256withRSA")
                 .put("certificateBase64", java.util.Base64.getEncoder().encodeToString(certificate.getEncoded()))
                 .put("certificateSha256", ReleaseTransport.hash(certificate.getEncoded())).put("baseArchiveEntries", entries);
@@ -113,8 +119,9 @@ public final class ReleasePlayerHostTest {
         return result.toByteArray();
     }
     private static File apk(File folder, JSONObject config, JSONObject base, boolean corrupt) throws Exception {
-        Map<String, byte[]> obb = new HashMap<>(); obb.put("SampleGame/Content/Paks/SampleGame-Android.pak", bytes(corrupt ? "wrong" : "paired-pak-100"));
-        obb.put("SampleGame/Unrelated.txt", bytes("ignored ordinary APK asset"));
+        String project = base.getString("projectId");
+        Map<String, byte[]> obb = new HashMap<>(); obb.put(project + "/Content/Paks/" + project + "-Android.pak", bytes(corrupt ? "wrong" : "paired-pak-100"));
+        obb.put(project + "/Unrelated.txt", bytes("ignored ordinary APK asset"));
         Map<String, byte[]> outer = new HashMap<>(); outer.put("assets/main.obb.png", zip(obb)); outer.put("lib/arm64-v8a/libUnreal.so", elf(100));
         outer.put("assets/release-player.json", raw(config)); outer.put("assets/release-base-manifest.json", bytes(ReleaseSet.canonical(base)));
         File result = new File(folder, "fixture.apk"); Files.write(result.toPath(), zip(outer)); return result;
@@ -122,11 +129,17 @@ public final class ReleasePlayerHostTest {
 
     private static final class TestActivity extends Activity {
         final File directory, apk;
+        final String appPackage;
         boolean debuggable;
         TestActivity(String name, JSONObject config, JSONObject base, boolean corrupt) throws Exception {
+            this(name, config, base, corrupt, "com.example.samplegame");
+        }
+        TestActivity(String name, JSONObject config, JSONObject base, boolean corrupt, String appPackage) throws Exception {
             directory = new File(evidence, name).getCanonicalFile(); check(directory.mkdirs(), "Create independent host installation");
             apk = apk(directory, config, base, corrupt);
+            this.appPackage = appPackage;
         }
+        @Override public String getPackageName() { return appPackage; }
         @Override public AssetManager getAssets() {
             return new AssetManager() {
                 @Override public InputStream open(String name) {
@@ -238,6 +251,31 @@ public final class ReleasePlayerHostTest {
         check(shippingArguments.contains("-SampleGameReleaseTicket=\"")
                 && !shippingArguments.contains("-SampleGameBootExitAfterMenu") && !shippingArguments.contains("/external"),
                 "A non-debuggable APK ignores external diagnostic and routing extras without blocking its managed launch");
+        check(!ReleasePlayer.acknowledge(acknowledgement().put("luaVersion", "not-applicable").toString()) && !store().state().isNull("boot"),
+                "The existing SampleGame package cannot confirm with the ProfileSample no-Lua marker");
+
+        JSONObject profileBase = manifest(100, "ProfileSample"), profileConfig = config(profileBase);
+        JSONObject profileWithLegacyPackage = new JSONObject(profileConfig.toString()).put("packageName", "com.example.samplegame");
+        JSONObject legacyWithProfilePackage = new JSONObject(bootstrap.toString()).put("packageName", "com.example.profilesample.adoption");
+        rejects(() -> ReleasePlayer.configuration(raw(profileWithLegacyPackage)), "ProfileSample trust cannot be installed under SampleGame's package");
+        rejects(() -> ReleasePlayer.configuration(raw(legacyWithProfilePackage)), "ProfileSample's isolated package cannot be bound to SampleGame trust");
+        rejects(() -> ReleaseSet.manifest(bytes(ReleaseSet.canonical(target)), profileConfig.getJSONObject("trust")),
+                "SampleGame release data cannot be selected under ProfileSample trust even with the other bindings equal");
+        reset(); TestActivity wrongProfilePackage = new TestActivity("wrong-installed-profile-package", profileConfig, profileBase, false);
+        rejects(() -> ReleasePlayer.prepareForLaunch(wrongProfilePackage), "A valid ProfileSample bootstrap cannot open under a different actual Android package");
+        reset(); TestActivity profile = new TestActivity("profile", profileConfig, profileBase, false, "com.example.profilesample.adoption");
+        File unrelatedSave = new File(profile.getExternalFilesDir(null), "UnrealGame/SampleGame/SampleGame/Saved/SaveGames/ExampleQuickSave.sav");
+        unrelatedSave.getParentFile().mkdirs(); Files.write(unrelatedSave.toPath(), bytes("unrelated-sample-save"));
+        prepareLoad(profile);
+        JSONObject profileAck = acknowledgement();
+        check(!new File(profileAck.getString("userRoot"), "Saved/SaveGames/ExampleQuickSave.sav").exists()
+                && Arrays.equals(Files.readAllBytes(unrelatedSave.toPath()), bytes("unrelated-sample-save")),
+                "A fresh ProfileSample installation cannot import or modify the unrelated SampleGame save layout");
+        check(!ReleasePlayer.acknowledge(profileAck.toString()) && !store().state().isNull("boot"),
+                "ProfileSample requires its exact no-Lua marker before confirming the boot");
+        check(ReleasePlayer.acknowledge(profileAck.put("luaVersion", "not-applicable").toString()) && store().state().isNull("boot"),
+                "ProfileSample's exact native acknowledgement confirms the selected pair without Lua");
+        awaitCheck();
 
         reset(); TestActivity healthy = new TestActivity("healthy", bootstrap, base, false);
         healthy.debuggable = true;

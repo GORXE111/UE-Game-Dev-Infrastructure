@@ -167,7 +167,7 @@ def manifest(raw, trust):
     for key in BINDINGS:
         require(value[key] == trust[key] and type(value[key]) is type(trust[key]), "Shell identity mismatch: " + key)
     project = value["projectId"]
-    require(value["platform"] == "Windows" or (value["platform"] == "Android_ARM64" and project == "SampleGame"),
+    require(value["platform"] == "Windows" or (value["platform"] == "Android_ARM64" and project in ("SampleGame", "ProfileSample")),
             "Unsupported project/platform")
     entry = windows_entry(project) if value["platform"] == "Windows" else "libUnreal.so"
     for key in ("projectId", "channel", "engineBuildId"):
