@@ -6,7 +6,8 @@ param(
     [Parameter(Mandatory)] [string] $OutputDirectory,
     [string] $PythonExecutable = 'python',
     [string] $ClangRoot,
-    [ValidateRange(1, 8)] [int] $MaxParallelActions = 2
+    [ValidateRange(1, 8)] [int] $MaxParallelActions = 2,
+    [switch] $RequireBuildReceipt
 )
 
 $ErrorActionPreference = 'Stop'
@@ -25,6 +26,14 @@ function Invoke-Logged([string] $Executable, [string] $Log, [string[]] $Argument
     if ($LASTEXITCODE -ne 0) { throw "$($report.phase) exited with code $LASTEXITCODE. See $Log." }
 }
 
+function Get-CleanCommit([string] $Directory) {
+    $commit = & git -C $Directory rev-parse --verify HEAD
+    if ($LASTEXITCODE -ne 0 -or $commit -cnotmatch '^(?:[0-9a-f]{40}|[0-9a-f]{64})$') { throw 'Build receipt requires a Git commit.' }
+    $changes = & git -C $Directory status --porcelain=v1 --untracked-files=all
+    if ($LASTEXITCODE -ne 0 -or $changes) { throw 'Build receipt requires a clean project checkout.' }
+    return $commit
+}
+
 try {
     if (-not $IsWindows) { throw 'Project profile packaging requires a Win64 UE host.' }
     $profilePath = (Resolve-Path -LiteralPath $Profile).Path
@@ -36,6 +45,7 @@ try {
     if ($profileExit -ne 0 -or $settings.status -cne 'validated') { throw "Project profile failed validation. $($settings.error)" }
     $source = Split-Path $settings.project
     $projectName = [IO.Path]::GetFileNameWithoutExtension($settings.project)
+    if ($RequireBuildReceipt) { $commit = Get-CleanCommit $source }
     $provider = $null
     $drive = $null
     $requested = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath(
@@ -165,7 +175,8 @@ try {
     $start.WorkingDirectory = $payload
     $start.UseShellExecute = $false
     $start.CreateNoWindow = $true
-    foreach ($arg in @($settings.startup.map, '-AdoptionProfileSmoke', '-NullRHI', '-Unattended', '-NoSound', "-abslog=$log")) {
+    $runtimeUser = [IO.Directory]::CreateDirectory((Join-Path $output 'RuntimeUser')).FullName
+    foreach ($arg in @($settings.startup.map, '-AdoptionProfileSmoke', '-NullRHI', '-Unattended', '-NoSound', "-abslog=$log", "-UserDir=$runtimeUser")) {
         $start.ArgumentList.Add($arg)
     }
     $process = [Diagnostics.Process]::Start($start)
@@ -182,6 +193,32 @@ try {
         -not (Select-String -LiteralPath $log -SimpleMatch -CaseSensitive -Quiet -Pattern $settings.startup.readyMarker) -or
         -not (Select-String -LiteralPath $log -SimpleMatch -Quiet -Pattern 'LogExit: Exiting.')) {
         throw 'Expected project readiness and normal packaged exit. See packaged-game.log.'
+    }
+    if ($RequireBuildReceipt) {
+        $report.phase = 'build-receipt'
+        if ((Get-CleanCommit $source) -cne $commit) { throw 'The project commit changed during the build.' }
+        $version = Get-Content -LiteralPath (Join-Path $engine 'Engine/Build/Build.version') -Raw | ConvertFrom-Json
+        $modules = Get-Content -LiteralPath (Join-Path $engine 'Engine/Binaries/Win64/UnrealEditor.modules') -Raw | ConvertFrom-Json
+        $toolchain = Get-Content -LiteralPath (Join-Path $output 'package.log') -Raw
+        $sdkMatch = [regex]::Match($toolchain, 'and Windows (?<version>\d+(?:\.\d+){2,3}) SDK')
+        $compilerMatch = [regex]::Match($toolchain, 'Using (?<name>Clang|Visual Studio \d{4}) (?<version>\d+(?:\.\d+)+) (?:compiler|toolchain)')
+        if (-not $sdkMatch.Success -or -not $compilerMatch.Success) { throw 'Could not identify the actual UBT compiler and Windows SDK. See package.log.' }
+        $metadata = [ordered]@{
+            project = $projectName; target = $settings.build.target; platform = $settings.build.platform
+            configuration = $settings.build.configuration; commit = $commit
+            engine = @{version = "$($version.MajorVersion).$($version.MinorVersion).$($version.PatchVersion)"; buildId = $modules.BuildId}
+            sdk = @{windows = $sdkMatch.Groups['version'].Value; compiler = $compilerMatch.Groups['name'].Value
+                compilerVersion = $compilerMatch.Groups['version'].Value}
+            configManifestSha256 = $report.configManifestSha256
+            tests = @{'editor-assets' = 'passed'; 'cooked-assets' = 'passed'; 'packaged-startup' = 'passed'}
+        }
+        $metadataPath = Join-Path $output 'receipt-metadata.json'
+        $metadata | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $metadataPath -Encoding utf8
+        $receipt = Join-Path $output 'build-receipt.json'
+        Invoke-Logged $python (Join-Path $output 'build-receipt.log') @('-X', 'utf8', '-B', (Join-Path $PSScriptRoot 'build_receipt.py'),
+            'create', '--archive', $payload, '--metadata', $metadataPath, '--output', $receipt)
+        $report.buildReceipt = $receipt
+        $report.buildReceiptSha256 = (Get-FileHash -LiteralPath $receipt -Algorithm SHA256).Hash.ToLowerInvariant()
     }
     $report.phase = 'complete'
     $report.status = 'project-profile-passed'

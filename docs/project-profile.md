@@ -33,4 +33,19 @@ pwsh -NoProfile -File .\Tools\Adoption\Invoke-ProjectProfile.ps1 `
 
 `report.json` 给出失败阶段或 `project-profile-passed`。可从 `asset-report.json`、`cooked-assets.json` 和 `packaged-game.log` 复查每项证据。此流程检查列出的地图和资产。全量依赖、软引用闭包和包体预算须使用项目自己的检查规则。
 
-Jenkins 的 `RUN_PROJECT_PROFILE` 可选择在配置了 `UE_ADOPTION_ENGINE_ROOT` 的 Windows 节点上执行同一脚本。现有脚本用于本地或构建节点验收，服务器启动与联机验证、Android、签名推广和公网发布各有后续阶段。
+Jenkins 的 `RUN_PROJECT_PROFILE` 可选择在配置了 `UE_ADOPTION_ENGINE_ROOT` 的 Windows 节点上执行同一脚本。`PROJECT_PROFILE` 是本次检出中项目配置的相对路径。作业将 `ci-evidence/<构建号>/ProjectProfile` 下的报告与回执归档，供后续阶段核对。专用服务器、Android 和公网发布各有独立验收。
+
+## 构建回执
+
+Jenkins 使用 `-RequireBuildReceipt`。本地可在干净的 Git 检出中加同一选项。游戏正常启动并退出后，脚本写出 `build-receipt.json`。回执记录项目提交、UE 版本及 Build ID、实际编译器和 Windows SDK、配置清单摘要、测试状态，以及归档中每个文件的 SHA-256 和大小。启动时使用独立用户目录，避免游戏日志和存档进入交付包。
+
+从可信构建记录取得 `report.json` 中的 `buildReceiptSha256`，在签名交接前用它核对同一份归档。
+
+```powershell
+python -X utf8 -B .\Tools\Adoption\build_receipt.py verify `
+  --archive C:\Work\UE-ProjectProfile-01\Archive\Windows `
+  --receipt C:\Work\UE-ProjectProfile-01\build-receipt.json `
+  --expected-receipt-sha256 $trustedReceiptSha256
+```
+
+回执替换、文件变化、缺失和新增都会使命令失败。签名阶段需使用刚校验的同一份不可变产物。
