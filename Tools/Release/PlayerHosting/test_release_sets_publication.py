@@ -13,6 +13,7 @@ from unittest.mock import patch
 import zipfile
 
 from cryptography import x509
+from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ed25519, padding, rsa
 from cryptography.x509.oid import NameOID
@@ -179,6 +180,79 @@ class ReleaseSetPublicationTests(unittest.TestCase):
         self.assertTrue(resumed["alreadyActivated"])
         remote.execute("rollback", dict(plan=self.plan, **stage))
         self.assertIsNone(remote.pointer(remote.ROOT / self.plan["channel"] / "current"))
+
+    def test_separate_current_reads_across_promotion_require_a_matching_signed_generation(self):
+        old = self.current_release()
+        plan, prepared = self.next_candidate()
+        stage, _ = self.stage(plan, prepared)
+        remote.execute("commit", dict(plan=plan, **stage))
+        current = old.parent.parent / "current"
+
+        old_raw = (current / "manifest.json").read_bytes()
+        remote.execute("activate", dict(plan=plan, **stage))
+        new_signature = (current / "manifest.json.sig").read_bytes()
+        with self.assertRaises(InvalidSignature):
+            remote.verify_signature(old_raw, new_signature, plan["verification"])
+
+        immutable_old = old / "versions/401"
+        old_signature = (immutable_old / "manifest.json.sig").read_bytes()
+        self.assertEqual(old_raw, (immutable_old / "manifest.json").read_bytes())
+        remote.verify_signature(old_raw, old_signature, plan["verification"])
+        new_raw = (current / "manifest.json").read_bytes()
+        self.assertEqual(sets.manifest(new_raw, plan["trust"])["releaseId"], 402)
+        remote.verify_signature(new_raw, new_signature, plan["verification"])
+
+        remote.execute("rollback", dict(plan=plan, **stage))
+        self.assertEqual((current / "manifest.json").read_bytes(), old_raw)
+        rolled_back_signature = (current / "manifest.json.sig").read_bytes()
+        self.assertEqual(rolled_back_signature, old_signature)
+        with self.assertRaises(InvalidSignature):
+            remote.verify_signature(new_raw, rolled_back_signature, plan["verification"])
+
+    def test_public_verification_reads_each_complete_file_and_rejects_same_size_tail_tamper(self):
+        plan, prepared = self.next_candidate({"content": b"a" * (1024**2 + 1)})
+        payload = prepared / "payload"
+        prefix = f"versions/{plan['releaseId']}/"
+        expected_names = sorted(name for name in plan["files"] if name.startswith(prefix))
+        tampered = next(name for name in expected_names if name.endswith(".pak"))
+        url_base = f"/samplegame/{plan['channel']}/updates/"
+        requested = []
+
+        def serve(path, tamper=False):
+            self.assertTrue(path.startswith(url_base))
+            name = path.removeprefix(url_base)
+            self.assertIn(name, expected_names)
+            requested.append(name)
+            data = (payload / name).read_bytes()
+            if tamper and name == tampered:
+                data = data[:-1] + b"b"
+            response = io.BytesIO(data)
+            response.status = 200
+            response.headers = {"Content-Length": str(len(data)), "Cache-Control": "public, immutable"}
+            return response
+
+        verified_dir = self.root / "verified"
+        verified_dir.mkdir()
+        with patch.object(publisher.deploy_players, "response", side_effect=serve):
+            verified = publisher.public_verify(plan, payload, verified_dir, 60)
+        expected = [dict(path=name, **plan["files"][name], fullPublicGetVerified=True) for name in expected_names]
+        self.assertEqual(requested, expected_names)
+        self.assertEqual(verified, expected)
+        self.assertEqual(sets.parse((verified_dir / "public-progress.json").read_bytes()), expected)
+
+        requested.clear()
+        failed_dir = self.root / "tampered"
+        host = unittest.mock.Mock()
+        host.run.side_effect = [dict(token="ab" * 16, stageName="fixture", before={"current": None, "protected": {}}), {}]
+        with patch.object(publisher.deploy_players, "response", side_effect=lambda path: serve(path, tamper=True)):
+            failed = publisher.publish(prepared, failed_dir, host, timeout=60)
+        self.assertEqual(failed["status"], "failed")
+        self.assertIn("Complete public release-set size/SHA differs", failed["error"])
+        self.assertFalse(failed["currentPromotionAttempted"])
+        self.assertEqual([call.args[0] for call in host.run.call_args_list], ["stage", "commit"])
+        bad_index = expected_names.index(tampered)
+        self.assertEqual(requested, expected_names[:bad_index + 1])
+        self.assertEqual(sets.parse((failed_dir / "public-progress.json").read_bytes()), expected[:bad_index])
 
     def current_release(self):
         stage, _ = self.stage()

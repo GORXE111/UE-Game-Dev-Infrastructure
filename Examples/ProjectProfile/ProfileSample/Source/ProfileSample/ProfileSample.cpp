@@ -1,4 +1,5 @@
 #include "ProfileConfigRows.h"
+#include "ProfileReleaseSample.h"
 
 #include "Engine/DataTable.h"
 #include "Engine/Engine.h"
@@ -7,6 +8,7 @@
 #include "HAL/PlatformMisc.h"
 #include "Misc/CommandLine.h"
 #include "Misc/CoreDelegates.h"
+#include "Misc/OutputDeviceRedirector.h"
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
 #include "Modules/ModuleManager.h"
@@ -17,7 +19,8 @@ class FProfileSampleModule final : public FDefaultGameModuleImpl
 public:
     void StartupModule() override
     {
-        if (FParse::Param(FCommandLine::Get(), TEXT("AdoptionProfileSmoke")))
+        bManagedBoot = FParse::Value(FCommandLine::Get(), TEXT("SampleGameReleaseTicket="), ReleaseTicket, false);
+        if (bManagedBoot || FParse::Param(FCommandLine::Get(), TEXT("AdoptionProfileSmoke")))
         {
             EndFrame = FCoreDelegates::OnEndFrame.AddRaw(this, &FProfileSampleModule::CheckGame);
         }
@@ -96,6 +99,13 @@ private:
                     }
                     UE_LOG(LogTemp, Display, TEXT("UE_ADOPTION_CONFIG_TABLES_READY enemy=Scout health=35 wave=Opening count=2"));
                 }
+                const uint8 ReleaseResult = CheckProfileReleaseSample(bManagedBoot, ReleaseTicket);
+                if (ReleaseResult != 0)
+                {
+                    GLog->FlushThreadedLogs();
+                    FPlatformMisc::RequestExitWithStatus(true, ReleaseResult);
+                    return;
+                }
                 UE_LOG(LogTemp, Display, TEXT("UE_PROJECT_PROFILE_READY map=/Engine/Maps/Entry table=GameplayTags rows=2"));
                 FPlatformMisc::RequestExit(false);
                 return;
@@ -106,6 +116,8 @@ private:
     FDelegateHandle EndFrame;
     FDelegateHandle PostEngineInit;
     FDelegateHandle NetworkFailure;
+    FString ReleaseTicket;
+    bool bManagedBoot = false;
 };
 
 IMPLEMENT_PRIMARY_GAME_MODULE(FProfileSampleModule, ProfileSample, "ProfileSample");

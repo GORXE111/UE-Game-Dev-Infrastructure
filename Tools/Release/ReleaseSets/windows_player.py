@@ -81,6 +81,7 @@ def read_config(root):
     sets.require(type(value) is dict and set(value) == CONFIG_FIELDS and type(value["format"]) is int and value["format"] in (1, 2), "Invalid player configuration")
     trust = value["trust"]
     sets.require(type(trust) is dict and set(trust) == TRUST_FIELDS and trust["platform"] == "Windows", "Invalid installed trust")
+    sets.windows_entry(trust["projectId"])
     sets.sha(value["publicKeyHex"])
     sets.sha(trust["baseManifestSha256"])
     sets.require(type(value["allowOffline"]) is bool, "Invalid offline policy")
@@ -160,7 +161,7 @@ def game_arguments(selected, ticket_path, user_args):
         sets.require(type(argument) is str and '"' not in argument and "\n" not in argument and "\r" not in argument
                      and (argument.lower() in flags or "=" in argument and argument.split("=", 1)[0].lower() in values),
                      "Game argument is not an approved display or diagnostic option")
-    entry = sets.child(selected["payloadRoot"], "SampleGame/Binaries/Win64/SampleGame.exe")
+    entry = sets.child(selected["payloadRoot"], sets.windows_entry(selected["manifest"]["projectId"]))
     return [str(entry), "-UserDir=" + selected["savesRoot"], "-SampleGameReleaseTicket=" + str(ticket_path),
             "-abslog=" + str(ticket_path.parent / "game.log"), *user_args]
 
@@ -224,10 +225,10 @@ def launch(store, selected, user_args=(), popen=subprocess.Popen, startup_timeou
         raise
 
 
-def legacy_snapshot(root, requested=None):
+def legacy_snapshot(root, requested=None, project="SampleGame"):
     """Only persistent saves/settings; shader caches and logs are reproducible."""
     if requested is None:
-        candidates = [Path(root) / "SampleGame", Path(os.environ.get("LOCALAPPDATA", str(root))) / "SampleGame"]
+        candidates = [Path(root) / project, Path(os.environ.get("LOCALAPPDATA", str(root))) / project]
         candidates = [path for path in candidates if (path / "Saved/SaveGames").is_dir()]
         sets.require(len(candidates) <= 1, "Multiple old save locations found; use --import-user-root to choose one")
         requested = candidates[0] if candidates else None
@@ -310,7 +311,7 @@ def run(root, offline=False, user_args=(), import_user_root=None, fetcher=fetch,
                 legacy, receipt = release_snapshot(root, source, config, base)
                 sets.atomic(sets.child(store.root, "save-import.json"), receipt)
             else:
-                legacy = legacy_snapshot(root, import_user_root)
+                legacy = legacy_snapshot(root, import_user_root, config["trust"]["projectId"])
             store.initialize(sets.child(root, "base/payload"), raw, legacy)
         else:
             sets.require(import_user_root is None and import_release_root is None, "Saves can only be imported before the first launch")

@@ -154,13 +154,22 @@ def build_id(value):
     return hashlib.sha256(canonical({key: value[key] for key in ("sourceCommit", "nativeSourceHash", "files", "save")})).hexdigest()
 
 
+def windows_entry(project):
+    require(type(project) is str and re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", project)
+            and project.lower() != "engine", "Invalid Windows project name")
+    return relative(f"{project}/Binaries/Win64/{project}.exe")
+
+
 def manifest(raw, trust):
     value = parse(raw)
     require(type(value) is dict and set(value) == FIELDS and type(value["format"]) is int
             and value["format"] == 1 and value["kind"] == "samplegame-release-set", "Unsupported release-set manifest")
     for key in BINDINGS:
         require(value[key] == trust[key] and type(value[key]) is type(trust[key]), "Shell identity mismatch: " + key)
-    require(value["projectId"] == "SampleGame" and value["platform"] in ("Windows", "Android_ARM64"), "Unsupported project/platform")
+    project = value["projectId"]
+    require(value["platform"] == "Windows" or (value["platform"] == "Android_ARM64" and project == "SampleGame"),
+            "Unsupported project/platform")
+    entry = windows_entry(project) if value["platform"] == "Windows" else "libUnreal.so"
     for key in ("projectId", "channel", "engineBuildId"):
         require(type(value[key]) is str and TOKEN.fullmatch(value[key]), "Invalid identity token")
     sha(value["shellCompatibilityId"])
@@ -184,17 +193,16 @@ def manifest(raw, trust):
             require((role == "native" and name == "libUnreal.so") or
                     (role == "content" and re.fullmatch(r"Content/Paks/[A-Za-z0-9_.-]+\.pak", name)), "Android release payload is outside the frozen APK shell")
         else:
-            require(name.startswith(("SampleGame/", "Engine/")), "Windows artifact outside the complete game tree")
+            require(name.startswith((project + "/", "Engine/")), "Windows artifact outside the complete game tree")
             if role == "native":
                 require(name.lower().endswith((".exe", ".dll")), "Native file must be executable/library")
             if role == "content":
-                require(name.startswith("SampleGame/Content/Paks/") and name.endswith(".pak"), "Content must be a cooked PAK")
+                require(name.startswith(project + "/Content/Paks/") and name.endswith(".pak"), "Content must be a cooked PAK")
         names.append(name)
         roles.add(role)
         total += item["size"]
     require(names == sorted(names) and len({name.lower() for name in names}) == len(names), "Duplicate, case-colliding or unsorted files")
     require({"native", "content"} <= roles and total <= MAX_TOTAL, "Incomplete or oversized release set")
-    entry = "libUnreal.so" if value["platform"] == "Android_ARM64" else "SampleGame/Binaries/Win64/SampleGame.exe"
     require(any(item["path"] == entry and item["role"] == "native" for item in files), "Native game entry missing")
     save_policy(value["save"])
     require(sha(value["buildId"]) == build_id(value), "Native/content/save build binding differs")
