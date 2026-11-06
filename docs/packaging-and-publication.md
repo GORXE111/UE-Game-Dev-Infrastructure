@@ -19,6 +19,8 @@ The Android build also needs its matching public signer certificate and a UE/And
 7. Download each final public file through the real public endpoint and compare its complete size and SHA-256. Check metadata and byte-range behavior before moving the public current pointer.
 8. If the project has a download page, update it after the full packages and update feeds have passed their checks. The source project's website tooling is maintained separately.
 
+Use the [read-only HTTPS verifier](server-gateway.md#verify-public-delivery-independently) to repeat the byte checks against an existing trusted plan without opening an SSH session or promoting a release.
+
 The tool source contains project adapters for `SampleGame`; it is not a universal Unreal BuildGraph. A new game must supply its target names, archive layout, required maps, package identifiers, trust roots, and compatibility policy.
 
 ## Required secret handling
