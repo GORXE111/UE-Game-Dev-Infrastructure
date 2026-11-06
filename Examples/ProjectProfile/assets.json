@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "assets": [
+    {
+      "path": "/Game/Generated/DT_GameplayTags.DT_GameplayTags",
+      "class": "/Script/Engine.DataTable"
+    }
+  ]
+}

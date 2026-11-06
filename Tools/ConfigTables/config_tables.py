@@ -1,6 +1,7 @@
-"""Validate typed CSV tables and export deterministic Unreal DataTable JSON."""
+"""Validate typed CSV or XLSX tables and export deterministic Unreal DataTable JSON."""
 
 import argparse
+from contextlib import closing
 import csv
 import hashlib
 import json
@@ -11,6 +12,8 @@ import re
 import stat
 import struct
 from tempfile import TemporaryDirectory
+from xml.etree.ElementTree import ParseError
+from zipfile import BadZipFile
 
 
 IDENTIFIER = re.compile(r"[A-Za-z_][A-Za-z0-9_]{0,62}")
@@ -78,15 +81,19 @@ def load_schema(root):
 
 
 def value_for(raw, kind, label):
-    if kind == "string":
+    if kind == "string" and isinstance(raw, str):
         return raw
-    if kind == "bool" and raw.lower() in {"true", "false"}:
-        return raw.lower() == "true"
-    if kind == "int" and INTEGER.fullmatch(raw):
+    if kind == "bool":
+        if isinstance(raw, bool):
+            return raw
+        if isinstance(raw, str) and raw.lower() in {"true", "false"}:
+            return raw.lower() == "true"
+    is_integer = type(raw) is int or (type(raw) is float and raw.is_integer())
+    if kind == "int" and (is_integer or (isinstance(raw, str) and INTEGER.fullmatch(raw))):
         integer = int(raw)
         require(-(2**31) <= integer < 2**31, f"{label}: integer is outside the Unreal int32 range")
         return integer
-    if kind == "float" and DECIMAL.fullmatch(raw):
+    if kind == "float" and (type(raw) in {int, float} or (isinstance(raw, str) and DECIMAL.fullmatch(raw))):
         number = float(raw)
         require(math.isfinite(number), f"{label}: expected a finite float")
         try:
@@ -97,29 +104,75 @@ def value_for(raw, kind, label):
     raise ValueError(f"{label}: expected {kind}")
 
 
-def load_rows(root, name, fields):
-    filename = name + ".csv"
-    with input_file(root, filename).open(encoding="utf-8-sig", newline="") as stream:
+def csv_rows(path):
+    with path.open(encoding="utf-8-sig", newline="") as stream:
         reader = csv.reader(stream, strict=True)
-        rows = {}
         try:
-            require(next(reader, None) == ["Name", *fields], f"{filename}: header must match Name and schema fields")
             for cells in reader:
-                if not cells:
-                    continue
-                label = f"{filename}:{reader.line_num}"
-                require(len(cells) == len(fields) + 1, f"{label}: expected {len(fields) + 1} columns")
-                row_name = cells[0]
-                require(identifier(row_name), f"{label}: invalid row Name {row_name!r}")
-                key = row_name.lower()
-                require(key not in rows, f"{label}: duplicate row Name {row_name!r}")
-                rows[key] = {"Name": row_name, **{
-                    field: value_for(raw, kind, f"{label} ({field})")
-                    for (field, kind), raw in zip(fields.items(), cells[1:])
-                }}
+                yield f"{path.name}:{reader.line_num}", cells
         except csv.Error as error:
-            raise ValueError(f"{filename}:{reader.line_num}: {error}") from error
-    require(bool(rows), f"{filename}: Unreal DataTable needs at least one data row")
+            raise ValueError(f"{path.name}:{reader.line_num}: {error}") from error
+
+
+def xlsx_rows(path, name, width):
+    try:
+        from defusedxml.common import DefusedXmlException
+        from openpyxl import DEFUSEDXML, load_workbook
+        from openpyxl.utils.exceptions import InvalidFileException
+    except ImportError as error:
+        raise ValueError(f'{path.name}: install XLSX support with python -m pip install '
+                         '"openpyxl>=3.1,<4" "defusedxml>=0.7,<1"') from error
+    require(DEFUSEDXML, f"{path.name}: enable defusedxml in openpyxl for XLSX input")
+
+    try:
+        with path.open("rb") as stream, closing(load_workbook(
+                stream, read_only=True, data_only=False, keep_links=False)) as workbook:
+            sheets = workbook.worksheets
+            sheet = next((entry for entry in sheets if entry.title.casefold() == name.casefold()), None)
+            if sheet is None and len(sheets) == 1:
+                sheet = sheets[0]
+            require(sheet is not None, f"{path.name}: use a worksheet named {name!r} or a workbook with one worksheet")
+            # Some workbook writers leave a stale used range. Read the cells actually present.
+            sheet.reset_dimensions()
+            for number, cells in enumerate(sheet.rows, 1):
+                for cell in cells:
+                    if cell.data_type == "f":
+                        raise ValueError(f"{path.name}!{sheet.title}:{cell.coordinate}: replace formulas with literal values")
+                    if cell.data_type == "e":
+                        raise ValueError(f"{path.name}!{sheet.title}:{cell.coordinate}: resolve spreadsheet error {cell.value!r}")
+                values = [cell.value for cell in cells]
+                while values and values[-1] is None:
+                    values.pop()
+                if number > 1 and values:
+                    values.extend([None] * (width - len(values)))
+                yield f"{path.name}!{sheet.title}:{number}", ["" if value is None else value for value in values]
+    except (BadZipFile, DefusedXmlException, InvalidFileException, ParseError, IndexError, KeyError, TypeError) as error:
+        raise ValueError(f"{path.name}: could not read XLSX workbook ({error})") from error
+
+
+def load_rows(root, name, fields):
+    filenames = [f"{name}.csv", f"{name}.xlsx"]
+    available = [filename for filename in filenames if os.path.lexists(root / filename)]
+    require(len(available) == 1, f"{name}: provide exactly one of {filenames[0]} or {filenames[1]}")
+    path = input_file(root, available[0])
+    header = ["Name", *fields]
+    rows = {}
+    with closing(csv_rows(path) if path.suffix == ".csv" else xlsx_rows(path, name, len(header))) as records:
+        label, cells = next(records, (path.name, None))
+        require(cells == header, f"{label}: header must match Name and schema fields")
+        for label, cells in records:
+            if not cells:
+                continue
+            require(len(cells) == len(header), f"{label}: expected {len(header)} columns")
+            row_name = cells[0]
+            require(identifier(row_name), f"{label}: invalid row Name {row_name!r}")
+            key = row_name.lower()
+            require(key not in rows, f"{label}: duplicate row Name {row_name!r}")
+            rows[key] = {"Name": row_name, **{
+                field: value_for(raw, kind, f"{label} ({field})")
+                for (field, kind), raw in zip(fields.items(), cells[1:])
+            }}
+    require(bool(rows), f"{path.name}: Unreal DataTable needs at least one data row")
     return [rows[key] for key in sorted(rows)]
 
 
@@ -161,7 +214,7 @@ def export_tables(source, output=None):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--source", type=Path, required=True, help="Directory containing schema.json and table CSVs")
+    parser.add_argument("--source", type=Path, required=True, help="Directory containing schema.json and one CSV or XLSX per table")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--output", type=Path, help="New destination directory for JSON and its manifest")
     mode.add_argument("--check", action="store_true", help="Validate without writing files")

@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "tables": [
+    {
+      "name": "GameplayTags",
+      "fields": [
+        {"name": "Tag", "type": "string"},
+        {"name": "DevComment", "type": "string"}
+      ]
+    }
+  ]
+}

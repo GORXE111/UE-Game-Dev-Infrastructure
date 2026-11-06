@@ -4,8 +4,8 @@
 
 ## 独立打表
 
-1. 把 `Examples/ConfigTables` 的 `schema.json` 和 CSV 复制到项目自己的配置源目录。`Name` 是 UE DataTable 的行键。其他列按 schema 的顺序排列，类型支持 `int`（32 位）、`float`（有限值，32 位范围）、`bool`（`true` 或 `false`）和 `string`。每张表至少保留一条数据。
-2. 用 UTF-8 CSV 保存数据。类型、表头和行名检查会在输出前执行。生成目录使用新路径，成功后包含每张表的 JSON 及 `manifest.json` 中的 SHA-256、字节数和行数。
+1. 把 `Examples/ConfigTables` 的 `schema.json` 和源表复制到项目配置源目录。`Name` 是 UE DataTable 的行键。其他列按 schema 的顺序排列，类型支持 `int`（32 位）、`float`（有限值，32 位范围）、`bool`（`true` 或 `false`）和 `string`。每张表至少保留一条数据。
+2. 每张表使用 `<表名>.csv` 或 `<表名>.xlsx`。CSV 用 UTF-8。Excel 和 WPS 可保存为 XLSX，使用与表同名的工作表，工作簿只有一张表时可保留默认工作表名。表头必须精确匹配。公式单元格先粘贴为值。生成目录使用新路径，成功后包含每张表的 JSON 及 `manifest.json` 中的 SHA-256、字节数和行数。
 3. 在 UE 内容浏览器导入 JSON，并选用与字段对应的 `FTableRowBase` 行类型。样例的 `GameplayTags.json` 使用引擎的 `GameplayTagTableRow`。`EnemyTuning.json` 的行类型由目标项目声明，字段为 `Health`、`MoveSpeed`、`bCanSprint` 和 `DisplayName`。 [Epic DataTable 导入约定](https://dev.epicgames.com/documentation/unreal-engine/data-driven-gameplay-elements-in-unreal-engine)
 
 ```powershell
@@ -15,7 +15,13 @@ python -X utf8 -B .\Tools\ConfigTables\config_tables.py `
   --source .\Examples\ConfigTables --output .\local-projects\ConfigExample
 ```
 
-先创建输出的父目录 `local-projects`。将 schema 和 CSV 纳入版本控制，由构建节点生成 JSON。只需检查源表的任务可用 `--check`。
+先创建输出的父目录 `local-projects`。将 schema 和源表纳入版本控制，由构建节点生成 JSON。只需检查源表的任务可用 `--check`。
+
+在使用 XLSX 的 Python 环境安装解析依赖。CSV 模式只使用 Python 标准库。
+
+```powershell
+python -m pip install -r .\Tools\ConfigTables\requirements-xlsx.txt
+```
 
 ## UE 样板导入与资源检查
 
@@ -61,4 +67,4 @@ pwsh -NoProfile -File .\Tools\CI\Invoke-AdoptionChecks.ps1 `
   -OutputDirectory C:\Work\UE-Adoption-Checks-01
 ```
 
-在 Jenkins 建立读取本仓库的 Pipeline，脚本路径为 `Jenkinsfile`。准备带 `windows` 标签的节点，并确保该节点的 `pwsh` 和 Python 来自预期安装。可在节点用 `UE_ADOPTION_PYTHON` 指定 Python 路径。每次构建归档报告、日志、生成的表和摘要。此入口检查配置、脚手架和离线签名流程，已通过 Windows 本机验证。Jenkins 控制器、UE Build、Cook、资源检查及发布任务各自需要在对应节点和环境验收。 [Jenkinsfile 指南](https://www.jenkins.io/doc/book/pipeline/jenkinsfile/) · [PowerShell 构建步骤](https://www.jenkins.io/doc/pipeline/steps/workflow-durable-task-step/)
+在 Jenkins 建立读取本仓库的 Pipeline，脚本路径为 `Jenkinsfile`。准备带 `windows` 标签的节点，并确保该节点的 `pwsh` 和 Python 来自预期安装。可用 `UE_ADOPTION_PYTHON` 指定 Python 路径。Jenkins 默认要求 XLSX 依赖并运行配置、项目配置、脚手架及离线签名测试。配置 UE 安装的节点可勾选 `RUN_PROJECT_PROFILE`，执行[真实 Win64 项目验收](project-profile.md)。控制器部署仍需独立复验。 [Jenkinsfile 指南](https://www.jenkins.io/doc/book/pipeline/jenkinsfile/) · [PowerShell 构建步骤](https://www.jenkins.io/doc/pipeline/steps/workflow-durable-task-step/)

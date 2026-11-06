@@ -1,0 +1,36 @@
+# 用一个配置验收 UE 项目
+
+从 [ProjectProfile 样板](../Examples/ProjectProfile/profile.json) 起步。只需要本地 UE 安装、对应的 Win64 C++ 工具链、PowerShell 7 和 Python 3.11+。打表输入包含 XLSX 时，还需安装[工作簿依赖](config-and-ci.md#独立打表)。UE 安装须提供 UnrealEditor-Cmd、PythonScriptPlugin、UAT 和 UnrealPak。
+
+## 配置字段
+
+| 字段 | 用途 |
+| --- | --- |
+| `version` | 配置格式版本，当前为 `1` |
+| `project`、`configSource`、`assetPlan` | `.uproject`、表目录、资源清单。相对于 profile 文件，解析后的文件仍须在 profile 目录内 |
+| `dataTables` | 将表名映射到新的 `/Game/` DataTable 对象路径和实际 UE 行结构。每项资产都应出现在资源清单里 |
+| `build` | `target`、`platform`、`configuration` 和待 Cook 地图 `maps`。当前支持 Win64 Development。`editorTarget` 默认为游戏 Target 加 `Editor` |
+| `startup` | 从已声明的地图选择启动入口。`readyMarker` 由游戏在真实初始化完成时写入日志 |
+| `serverTarget` | 可选的服务器 Target 声明，供后续专用服务器阶段使用 |
+
+资源清单逐项声明完整对象路径和类，使用 `/Game` 或 `/Engine`。资产名和地图包名沿用编辑器中的实际大小写。生成的 DataTable 使用工程内的新路径。生成目录适合专门放置可由源表重建的资产。
+
+## 运行验收
+
+```powershell
+pwsh -NoProfile -File .\Tools\Adoption\Invoke-ProjectProfile.ps1 `
+  -Profile .\Examples\ProjectProfile\profile.json `
+  -EngineRoot C:\UE `
+  -OutputDirectory C:\Work\UE-ProjectProfile-01
+```
+
+如需自定义工具链，使用 `-PythonExecutable`、`-ClangRoot` 和 `-MaxParallelActions`。输出目录使用全新短英文路径，位置在源 `.uproject` 目录外。脚本复制工程的标准源目录到输出中，再写入生成表与测试打包配置。源工程和源表可以继续用于日常编辑。样板打包使用 PAK 和传统 Cook 输出。首次运行可能等待着色器编译。
+
+1. 生成表 JSON，记录 `ConfigTables/manifest.json` 的摘要。
+2. 编译 Editor Target，在隔离工程里导入表，并用另一个编辑器进程从 Asset Registry 核对、加载实际落盘资产。
+3. Build、Cook、Stage 和归档 Win64 包。使用 UnrealPak 的真实清单核对声明的地图和资产包，记录它们所在的 PAK 与大小。
+4. 以 `-AdoptionProfileSmoke` 无头启动归档内的程序。样板在地图进入 BeginPlay 后加载 Cook 的 DataTable，核对行键、标签和中文备注，再写入就绪标记并正常退出。接入自己的项目时实现同一启动开关和对应的就绪逻辑。
+
+`report.json` 给出失败阶段或 `project-profile-passed`。可从 `asset-report.json`、`cooked-assets.json` 和 `packaged-game.log` 复查每项证据。此流程检查列出的地图和资产。全量依赖、软引用闭包和包体预算须使用项目自己的检查规则。
+
+Jenkins 的 `RUN_PROJECT_PROFILE` 可选择在配置了 `UE_ADOPTION_ENGINE_ROOT` 的 Windows 节点上执行同一脚本。现有脚本用于本地或构建节点验收，服务器启动与联机验证、Android、签名推广和公网发布各有后续阶段。

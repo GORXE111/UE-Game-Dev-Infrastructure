@@ -1,4 +1,5 @@
 import hashlib
+from importlib.util import find_spec
 import json
 from pathlib import Path
 import subprocess
@@ -37,6 +38,21 @@ class ConfigTablesTests(unittest.TestCase):
 
     def write_csv(self, name, content):
         (self.source / f"{name}.csv").write_text(content, encoding="utf-8-sig", newline="")
+
+    def write_workbook(self, sheets):
+        from openpyxl import Workbook
+
+        workbook = Workbook()
+        workbook.remove(workbook.active)
+        try:
+            for title, rows in sheets.items():
+                sheet = workbook.create_sheet(title)
+                for row in rows:
+                    sheet.append(row)
+                sheet["H2"].number_format = "0.00"
+            workbook.save(self.source / "Items.xlsx")
+        finally:
+            workbook.close()
 
     def test_deterministic_export_and_manifest(self):
         first = self.root / "first"
@@ -104,6 +120,60 @@ class ConfigTablesTests(unittest.TestCase):
         self.assertEqual(report["status"], "config-validated")
         self.assertEqual(report["schemaVersion"], 2)
         self.assertEqual(list(self.root.iterdir()), [self.source])
+
+    @unittest.skipUnless(find_spec("openpyxl") and find_spec("defusedxml"), "optional XLSX dependencies unavailable")
+    def test_xlsx_and_csv_produce_identical_output(self):
+        csv_output = self.root / "csv"
+        export_tables(self.source, csv_output)
+        (self.source / "Items.csv").unlink()
+        rows = [
+            ["Name", "Price", "Title", "Enabled", "Weight"],
+            ["Zed", 3, None, False, 0.5],
+            ["Apple", 2.0, "苹果", True, 0.001],
+        ]
+        for index, sheets in enumerate(({"Sheet1": rows}, {"Notes": [["Not a config table"]], "Items": rows})):
+            with self.subTest(sheets=list(sheets)):
+                self.write_workbook(sheets)
+                workbook = self.source / "Items.xlsx"
+                original = workbook.read_bytes()
+                output = self.root / f"xlsx-{index}"
+                manifest = export_tables(self.source, output)
+                for filename in (*manifest["files"], "manifest.json"):
+                    self.assertEqual((csv_output / filename).read_bytes(), (output / filename).read_bytes())
+                self.assertEqual(workbook.read_bytes(), original)
+
+    @unittest.skipUnless(find_spec("openpyxl") and find_spec("defusedxml"), "optional XLSX dependencies unavailable")
+    def test_xlsx_rejects_bad_inputs_before_output(self):
+        (self.source / "Items.csv").unlink()
+        header = ["Name", "Price", "Title", "Enabled", "Weight"]
+        valid_row = ["Apple", 2, "苹果", True, 0.001]
+        output = self.root / "output"
+        cases = [
+            ({"Notes": [header, valid_row], "Other": [header, valid_row]}, "worksheet named 'Items'"),
+            ({"Items": [header, ["Apple", "=1+1", "苹果", True, 0.001]]}, "Items:B2: replace formulas"),
+            ({"Items": [header, ["Apple", "#DIV/0!", "苹果", True, 0.001]]}, "resolve spreadsheet error"),
+            ({"Items": [header, ["Apple", 2.5, "苹果", True, 0.001]]}, "Price.*expected int"),
+            ({"Items": [header, ["Apple", True, "苹果", True, 0.001]]}, "Price.*expected int"),
+            ({"Items": [header, ["Apple", 2, "苹果", 1, 0.001]]}, "Enabled.*expected bool"),
+            ({"Items": [header, ["Apple", 2, 1, True, 0.001]]}, "Title.*expected string"),
+            ({"Items": [header, [*valid_row, "unexpected"]]}, "expected 5 columns"),
+            ({"Items": [header, valid_row, ["apple", 4, "重复", True, 0.1]]}, "duplicate row Name"),
+        ]
+        for sheets, message in cases:
+            with self.subTest(message=message):
+                self.write_workbook(sheets)
+                with self.assertRaisesRegex(ValueError, message):
+                    export_tables(self.source, output)
+                self.assertFalse(output.exists())
+        (self.source / "Items.xlsx").write_bytes(b"not an XLSX file")
+        with self.assertRaisesRegex(ValueError, "could not read XLSX workbook"):
+            export_tables(self.source, output)
+        self.assertFalse(output.exists())
+
+    def test_rejects_ambiguous_source_without_opening_workbook(self):
+        (self.source / "Items.xlsx").write_bytes(b"not an XLSX file")
+        with self.assertRaisesRegex(ValueError, "provide exactly one of Items.csv or Items.xlsx"):
+            export_tables(self.source)
 
 
 if __name__ == "__main__":

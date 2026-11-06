@@ -2,7 +2,8 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)] [string] $OutputDirectory,
-    [string] $PythonExecutable = 'python'
+    [string] $PythonExecutable = 'python',
+    [switch] $RequireXlsx
 )
 
 $ErrorActionPreference = 'Stop'
@@ -53,6 +54,10 @@ import cryptography
 print(f"Python {sys.version.split()[0]}, cryptography {cryptography.__version__}")
 '@
     Invoke-Check 'python-runtime' $python @('-X', 'utf8', '-B', '-c', $runtimeCheck)
+    if ($RequireXlsx) {
+        Invoke-Check 'xlsx-runtime' $python @('-X', 'utf8', '-B', '-c',
+            'from openpyxl import DEFUSEDXML; assert DEFUSEDXML, "Install and enable defusedxml for XLSX checks"')
+    }
 
     $configTools = Join-Path $repository 'Tools/ConfigTables'
     Invoke-Check 'config-tests' $python @('-X', 'utf8', '-B', '-m', 'unittest', 'discover', '-s', $configTools, '-p', 'test_config_tables.py', '-v') {
@@ -69,6 +74,14 @@ print(f"Python {sys.version.split()[0]}, cryptography {cryptography.__version__}
         if ($export.status -cne 'config-exported' -or
             -not (Test-Path -LiteralPath (Join-Path $configOutput 'manifest.json') -PathType Leaf)) {
             throw 'The configuration exporter did not produce its manifest. See config-export.log.'
+        }
+    }
+
+    Invoke-Check 'profile-tests' $python @('-X', 'utf8', '-B', '-m', 'unittest', 'discover', '-s',
+        (Join-Path $repository 'Tools/Adoption'), '-p', 'test_*.py', '-v') {
+        param($Log)
+        if (-not (Select-String -LiteralPath $Log -Pattern '^Ran [1-9][0-9]* tests? in ' -Quiet)) {
+            throw 'No project profile tests ran. See profile-tests.log.'
         }
     }
 
