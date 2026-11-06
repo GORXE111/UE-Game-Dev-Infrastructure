@@ -70,7 +70,7 @@ python -X utf8 -B .\Tools\Adoption\verify_managed_android.py `
   --prepared D:\UEAndroidQA\Prepared --tls D:\UEAndroidQA\Tls --output D:\UEAndroidQA\Evidence
 ```
 
-Set the engine and toolchain paths before running the commands. If the Editor needs Clang, pass `-ClangRoot` to the profile builder. Use an unused emulator serial and a clean, dedicated AVD. The runtime verifier refuses an existing sample installation. It serves the signed versions only on host loopback and uses the sample's app-private state to check health, activation, failed boot and recovery. Release IDs 100–102 belong to this test channel.
+Set the engine and toolchain paths before running the commands. If the Editor needs Clang, pass `-ClangRoot` to the profile builder. Use an unused emulator serial and a clean, dedicated AVD. Start the Android Emulator with `-gpu host` on a Vulkan-capable workstation so the guest can expose a Vulkan GPU accepted by UE. The runtime verifier refuses an existing sample installation. It serves the signed versions only on host loopback and uses the sample's app-private state to check health, activation, failed boot and recovery. Release IDs 100–102 belong to this test channel.
 
 ## Compatibility policy
 

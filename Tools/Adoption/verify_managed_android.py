@@ -423,7 +423,8 @@ class Device:
             require(sum(p == pid and library_marker in line for p, line in logs) == 1,
                     "UE native library loaded more than once in the same sample launch")
             lines = [line for p, line in logs if p == pid]
-            require(not any("only supports OpenGL ES" in line or "LogAndroid: Error: Fatal error:" in line for line in lines),
+            require(not any("only supports OpenGL ES" in line or "LogAndroid: Error: Fatal error:" in line
+                            or "devices meet all the criteria!" in line for line in lines),
                     f"Unreal failed before reporting {name} readiness. See {self.log_path.name}.")
             progress = 997 if fault else 731
             markers = [f"UE_ADOPTION_RELEASE_ANDROID_PAYLOAD_READY release={number} paks={pak_count}",

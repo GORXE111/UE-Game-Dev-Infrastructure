@@ -4,7 +4,7 @@
 
 The private source project completed a V1.0.7 Development baseline and public update publication for Windows PC and an Android ARM64 emulator. Its local qualification covered fresh installation, update selection, code/content checks, save-generation handover, pre-health failure recovery, cached-content corruption recovery, announcement display, and public archive downloads checked against complete SHA-256 values.
 
-The public export uses sample identifiers, an example domain and placeholder signing identities. Its checks cover generated source files, offline transactions, host tests and a signed Win64 sample update over isolated HTTPS.
+The public export uses sample identifiers, an example domain and disposable or placeholder signing identities. Its checks cover generated source files, offline transactions, host tests and signed Win64 and Android sample updates over isolated HTTPS.
 
 ## Public repository checks
 
@@ -21,7 +21,7 @@ The public export uses sample identifiers, an example domain and placeholder sig
 - Windows release-tool tests cover the Python store, launcher, native signing and hosting. The platform-dependent and omitted-project cases are reported as skips. The Windows launcher test uses a real child process with a mismatched health record to verify that the startup timeout still applies.
 - Ubuntu passed 46 gateway tests. An isolated Nginx 1.24.0 listener served real HTTPS responses for current manifests, full-file downloads, HEAD, Range and missing files. Write requests were denied.
 - The Android Java source compiled against SDK 36 with AndroidX. Host doubles covered selection, recovery, download and the debuggable-APK gate. The host Java run used JDK 17 and org.json 20240205. Symlink-dependent host branches were skipped on Windows.
-- A follow-up on the public Android source also passed the managed host suites for release selection, player health and recovery using an ASCII scratch path. These JVM tests use a simulated library loader and transport. The independent ProfileSample still needs its APK bootstrap wiring, a dedicated signer and native JNI readiness before running the Android install, update and rollback on a device or emulator.
+- The public Android sample passed the managed JVM suites for release selection, player health and recovery on an ASCII scratch path. Those suites simulate the library loader and transport. A separate real API 36 emulator run used ARM64 translation and the host Vulkan GPU. It installed the independently signed APK, loaded the selected ARM64 library and mounted PAK, and confirmed release 100 through JNI after reading actual cooked data and writing an Unreal SaveGame. It downloaded and verified release 101 over isolated HTTPS and activated the new library and PAK together on cold start. Release 102 downloaded, changed its own save and exited before health. The next launch restored release 101 and the exact original save bytes, and blocked 102. See the [Android update workflow](update-and-rollback.md#verify-the-independent-android-sample).
 
 ## Candidate staging I/O
 
@@ -41,7 +41,7 @@ The Python store now hashes candidate source files as it copies them into a priv
 
 | Priority | Gap | Acceptance target |
 | --- | --- | --- |
-| P0 | Managed packaging needs project build scripts, Lua identity, and a UE readiness adapter. | Build an independent sample game on Windows and Android. Confirm a real updated game after Cook and recover its saves after a failed startup. |
+| P0 | Managed packaging and readiness adapters still need to be integrated for each adopting game. | Apply the independent sample workflow to another project and qualify its real maps, gameplay readiness, signing and save migration policy. |
 | P1 | Project identity, public origin, paths and certificate pins still span several adapters. | Use one validated deployment profile and verify that an incorrect project, channel, signer or origin is rejected before upload. |
 | P1 | Native and PAK files are hashed repeatedly during download, staging and cold boot. | Capture phase timings and bytes read, copied and hashed on equal payloads before and after a change. Preserve signed inventory verification before selection and after recovery. |
 | P1 | The legacy native publisher uses a weaker promotion flow than joint releases. | Exercise two concurrent publications, a lost SSH session and a failed public readback against a disposable server. |
