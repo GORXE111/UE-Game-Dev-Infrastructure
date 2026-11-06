@@ -35,6 +35,8 @@ pwsh -NoProfile -File .\Tools\Adoption\Invoke-ProjectProfile.ps1 `
 
 Jenkins 的 `RUN_PROJECT_PROFILE` 可选择在配置了 `UE_ADOPTION_ENGINE_ROOT` 的 Windows 节点上执行同一脚本。`PROJECT_PROFILE` 是本次检出中项目配置的相对路径。作业将 `ci-evidence/<构建号>/ProjectProfile` 下的报告与回执归档，供后续阶段核对。专用服务器、Android 和公网发布各有独立验收。
 
+Windows 构建节点使用独立的短工作区，例如 `E:\UECI`。在本次验收的 UE 5.8 UAT 中，路径里的 `Programs` 目录段会被重写为 `Source/Programs`，而重定向到很深的用户目录会触发 UBT 路径长度限制。把 Jenkins 的工作区与控制器程序目录分开可以避开两者。
+
 ## 构建回执
 
 Jenkins 使用 `-RequireBuildReceipt`。本地可在干净的 Git 检出中加同一选项。游戏正常启动并退出后，脚本写出 `build-receipt.json`。回执记录项目提交、UE 版本及 Build ID、实际编译器和 Windows SDK、配置清单摘要、测试状态，以及归档中每个文件的 SHA-256 和大小。启动时使用独立用户目录，避免游戏日志和存档进入交付包。
