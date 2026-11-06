@@ -129,7 +129,7 @@ try {
 
     $package = 'com.example.profilesample.adoption'
     $settings = @('', $section, "PackageName=$package", 'bBuildForArm64=True', 'bBuildForX8664=False',
-        'bBuildForES31=True', 'bSupportsVulkan=False', 'bSupportsVulkanSM5=False', 'bPackageDataInsideApk=True',
+        'bBuildForES31=False', 'bSupportsVulkan=True', 'bSupportsVulkanSM5=False', 'bPackageDataInsideApk=True',
         'bSupportAdMob=False', 'bShowLaunchImage=True', 'bUseExternalFilesDir=True', 'bEnableBundle=False')
     if ($qaCa) {
         $settings += 'bProfileSampleQaTls=True'

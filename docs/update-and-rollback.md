@@ -41,7 +41,7 @@ This workflow covers the actual packaged game on a local HTTPS origin. Pass `--f
 
 ## Verify the independent Android sample
 
-Use a full UE source engine with Android packaging tools, a matching Editor, the engine's Android SDK and NDK, and a dedicated API 36 emulator. The sample is ARM64 Development and cooks ETC2 PAKs into an embedded OBB. On an x86_64 emulator, check that the guest supports ARM64 translation. Use short, isolated output paths with space for the initial native build and three archives.
+Use a full UE source engine with Android packaging tools, a matching Editor, the engine's Android SDK and NDK, and a dedicated API 36 emulator. The sample is ARM64 Development, uses mobile Vulkan and cooks ETC2 PAKs into an embedded OBB. On an x86_64 emulator, check that the guest supports Vulkan and ARM64 translation. Use short, isolated output paths with space for the initial native build and three archives.
 
 Create the temporary TLS identity outside the checkout. Only `qa-ca.der` is copied into the test APK. Keep the TLS private key with the isolated server. The APK trusts that CA for `10.0.2.2`, the emulator's host loopback address, with cleartext disabled. A separate disposable RSA signer authenticates the APK and release manifests.
 
