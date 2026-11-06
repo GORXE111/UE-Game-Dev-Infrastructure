@@ -209,12 +209,13 @@ def verify_downloads(origin, trusted, ca_file, destination):
     return len(verified)
 
 
-def launch(output, install, config, ca_file, name, expected_exit, game_role=None, release=None):
+def launch(output, install, config, ca_file, name, expected_exit, game_role=None, release=None, player=None):
     state = windows_player.store_root(install, config)
     existing = set((state / "boots").glob("*"))
     env = dict(os.environ, SSL_CERT_FILE=str(ca_file), NO_PROXY="127.0.0.1")
-    command = [sys.executable, "-X", "utf8", "-B", str(RELEASE_TOOLS / "windows_player.py"),
-               "--root", str(install), "--headless", "--", "-NullRHI", "-NoSound", "-Unattended", "-NoSplash"]
+    command = [str(player)] if player else [sys.executable, "-X", "utf8", "-B", str(RELEASE_TOOLS / "windows_player.py"),
+                                             "--root", str(install)]
+    command += ["--headless", "--", "-NullRHI", "-NoSound", "-Unattended", "-NoSplash"]
     with (output / (name + ".log")).open("xb") as log:
         with subprocess.Popen(command, stdout=log, stderr=subprocess.STDOUT, env=env) as process:
             try:
@@ -281,6 +282,19 @@ def run(args, output, report):
     install = output / "Installed"
     shutil.copytree(versions / "100" / "payload", install / "base" / "payload")
     shutil.copyfile(versions / "100" / "manifest.json", install / "base" / "manifest.json")
+    player = None
+    report["launcher"] = {"mode": "source"}
+    if args.frozen_player:
+        bundle = args.frozen_player.resolve(strict=True)
+        executable, libraries = bundle / "SampleGameReleasePlayer.exe", bundle / "_release_internal"
+        sets.plain(executable)
+        sets.plain(libraries, True)
+        sets.require({item.name for item in bundle.iterdir()} == {executable.name, libraries.name},
+                     "Expected the Build-WindowsPlayer onedir bundle")
+        player = install / (PROJECT + ".exe")
+        shutil.copyfile(executable, player)
+        shutil.copytree(libraries, install / libraries.name)
+        report["launcher"] = dict(mode="frozen", executableSha256=sets.digest(player))
     config = dict(format=2, trust=trust, publicKeyHex=key.public_key().public_bytes(
         serialization.Encoding.Raw, serialization.PublicFormat.Raw).hex(),
                   manifestUrl=ORIGIN + PREFIX + "manifest.json", allowOffline=False)
@@ -291,23 +305,25 @@ def run(args, output, report):
     with TestOrigin(versions, context) as origin:
         report["verifiedDownloads"] = verify_downloads(origin, trusted, ca_file, output / "https-full-downloads.json")
         report["phase"] = "fresh-install"
-        report["baseline"] = launch(output, install, config, ca_file, "baseline", 0, "baseline", 100)
+        report["baseline"] = launch(output, install, config, ca_file, "baseline", 0, "baseline", 100, player=player)
         report["phase"] = "promotion-race"
         origin.requests.clear()
         origin.switch_after_manifest = 101
         before = state_path.read_bytes()
-        launch(output, install, config, ca_file, "mixed-generation", 1)
+        launch(output, install, config, ca_file, "mixed-generation", 1, player=player)
+        diagnostic = sets.read_bounded(install / "release-player-error.log", 65536)
+        sets.write_new(output / "mixed-generation-error.log", diagnostic)
         sets.require(origin.requests == ["versions/100/manifest.json", "versions/101/manifest.json.sig"]
                      and state_path.read_bytes() == before
-                     and "signature rejected" in (output / "mixed-generation.log").read_text(encoding="utf-8").lower(),
+                     and b"signature rejected" in diagnostic.lower(),
                      "Mixed metadata did not fail closed before fetching payload")
         report["mixedGenerationRejected"] = True
         report["phase"] = "valid-update"
-        report["candidate"] = launch(output, install, config, ca_file, "candidate", 0, "candidate", 101)
+        report["candidate"] = launch(output, install, config, ca_file, "candidate", 0, "candidate", 101, player=player)
         report["phase"] = "fault-and-rollback"
         origin.release = 102
-        report["fault"] = launch(output, install, config, ca_file, "fault", 1, "fault", 102)
-        report["recovered"] = launch(output, install, config, ca_file, "recovered", 0, "candidate", 101)
+        report["fault"] = launch(output, install, config, ca_file, "fault", 1, "fault", 102, player=player)
+        report["recovered"] = launch(output, install, config, ca_file, "recovered", 0, "candidate", 101, player=player)
     old, candidate, fault, recovered = (report[key] for key in ("baseline", "candidate", "fault", "recovered"))
     state = sets.parse(state_path.read_bytes(), 65536)
     sets.require(old["save"] == candidate["save"] == recovered["save"] != fault["save"]
@@ -325,6 +341,7 @@ def main():
     for role in ROLES:
         parser.add_argument("--" + role, type=Path, required=True, help="Trusted project-profile report and receipt digest")
     parser.add_argument("--output", type=Path, required=True, help="Fresh short output outside the repository")
+    parser.add_argument("--frozen-player", type=Path, help="Onedir launcher output from Build-WindowsPlayer.ps1")
     args = parser.parse_args()
     output = args.output.resolve()
     sets.require(os.name == "nt" and not output.is_relative_to(Path(__file__).resolve().parents[2]),
